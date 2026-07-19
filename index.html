@@ -975,20 +975,21 @@ async function loadUserDataFromCloud() {
 
 // Save user data to cloud
 async function saveUserDataToCloud() {
-  if (!currentUser) return;
-  try {
-    await db.collection('users').doc(currentUser.uid).set({
-      songs: songs,
-      setlists: setlists,
-      teams: teams,
-      sectionNotes: sectionNotes,
-      inlineComments: inlineComments,
-      lastSync: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    console.log('✅ Данные сохранены в облако');
-  } catch (error) {
-    console.error('❌ Ошибка сохранения:', error);
-  }
+    if (!currentUser) return;
+    try {
+        await db.collection('users').doc(currentUser.uid).set({
+            songs: songs,
+            setlists: setlists,
+            teams: teams,
+            sectionNotes: sectionNotes,
+            inlineComments: inlineComments,
+            lastSync: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true }); // ✅ ИСПРАВЛЕНО: merge: true сохраняет аватарку
+        
+        console.log('✅ Данные сохранены в облако');
+    } catch (error) {
+        console.error('❌ Ошибка сохранения:', error);
+    }
 }
 
 // === ГЕНЕРАЦИЯ УНИКАЛЬНОГО ID ===
@@ -2965,20 +2966,26 @@ function applyCropZoom(val) {
 function saveCroppedAvatar() {
     const img = document.getElementById('crop-image');
     const canvas = document.createElement('canvas');
-    const size = 512;
+    
+    // ✅ УМЕНЬШАЕМ РАЗМЕР С 512 ДО 256 (для аватарки в кружочке этого более чем достаточно)
+    const size = 256; 
     canvas.width = size;
     canvas.height = size;
+    
     const ctx = canvas.getContext('2d');
     const finalScale = cropState.baseScale * cropState.zoom;
     const srcX = -cropState.imgX / finalScale;
     const srcY = -cropState.imgY / finalScale;
     const srcSize = cropState.containerSize / finalScale;
+    
     ctx.drawImage(img, srcX, srcY, srcSize, srcSize, 0, 0, size, size);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+    
+    // ✅ УМЕНЬШАЕМ КАЧЕСТВО С 0.8 ДО 0.5 (визуально в кружке 48x48px разницы нет, но файл легче в 3 раза)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.5); 
+    
     saveAvatarToStorage(dataUrl);
     closeModal('modal-crop');
 }
-
 function saveAvatarToStorage(dataUrl) {
     if (!currentUser) return;
     localStorage.setItem('clc_avatar_' + currentUser.uid, dataUrl);
