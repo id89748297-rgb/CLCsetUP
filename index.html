@@ -421,7 +421,8 @@ db.enablePersistence().catch((err) => {
       <input type="email" id="login-email" class="search-box" placeholder="Email" autocomplete="email">
       <input type="password" id="login-password" class="search-box" placeholder="Пароль" autocomplete="current-password">
       <button class="btn-main" onclick="loginWithEmail()">Войти</button>
-      <button class="btn-secondary" onclick="showRegisterForm()" style="width: 100%; margin-top: 10px;">📝 Создать аккаунт</button>
+<button class="btn-secondary" onclick="resetPassword()" style="width: 100%; margin-top: 10px; background: #546e7a;">📧 Не приходит письмо? / Сброс пароля</button>
+<button class="btn-secondary" onclick="showRegisterForm()" style="width: 100%; margin-top: 10px;">📝 Создать аккаунт</button>
     </div>
     
     <div id="auth-error" style="color: #ef5350; text-align: center; margin-top: 15px; display: none;"></div>
@@ -660,33 +661,48 @@ db.enablePersistence().catch((err) => {
 let currentUser = null;
 
 // Listen for auth state changes (как в Telegram!)
-auth.onAuthStateChanged((user) => {
-  if (user) {
-    currentUser = user;
-    console.log('✅ Авторизован:', user.email);
-    const logoutBtn = document.getElementById('logout-btn');
-    if (logoutBtn) logoutBtn.style.display = 'flex';
-    loadUserDataFromCloud();
-    // Если пользователь авторизован, показываем главную
-    const authPage = document.getElementById('page-auth');
-    const homePage = document.getElementById('page-home');
-    if (authPage && homePage) {
-      authPage.classList.remove('active');
-      homePage.classList.add('active');
-    }
-  } else {
-    currentUser = null;
-    console.log('❌ Не авторизован');
-    const logoutBtn = document.getElementById('logout-btn');
-    if (logoutBtn) logoutBtn.style.display = 'none';
-    // Если не авторизован — показываем страницу входа
-    const authPage = document.getElementById('page-auth');
-    const homePage = document.getElementById('page-home');
-    if (authPage && homePage) {
-      homePage.classList.remove('active');
-      authPage.classList.add('active');
-    }
-  }
+auth.onAuthStateChanged(async (user) => {
+const authPage = document.getElementById('page-auth');
+const homePage = document.getElementById('page-home');
+const logoutBtn = document.getElementById('logout-btn');
+
+if (user) {
+// ✅ ПРОВЕРКА: Почта должна быть подтверждена
+if (!user.emailVerified) {
+currentUser = null; // Считаем пользователя "не полноценным"
+if (logoutBtn) logoutBtn.style.display = 'none';
+if (authPage && homePage) {
+homePage.classList.remove('active');
+authPage.classList.add('active');
+}
+// Показываем сообщение прямо на странице авторизации
+showAuthError(`⚠️ Почта не подтверждена! Проверьте ящик ${user.email}.`);
+console.log('🔒 Вход заблокирован: email не подтвержден');
+return;
+}
+
+// ✅ ВСЁ ОК: Пользователь подтвержден
+currentUser = user;
+console.log('✅ Авторизован:', user.email);
+if (logoutBtn) logoutBtn.style.display = 'flex';
+
+// Загрузка данных (работает офлайн благодаря enablePersistence)
+loadUserDataFromCloud();
+
+if (authPage && homePage) {
+authPage.classList.remove('active');
+homePage.classList.add('active');
+}
+} else {
+// Не авторизован
+currentUser = null;
+console.log('❌ Не авторизован');
+if (logoutBtn) logoutBtn.style.display = 'none';
+if (authPage && homePage) {
+homePage.classList.remove('active');
+authPage.classList.add('active');
+}
+}
 });
 
 // Sign in with Google
@@ -716,39 +732,29 @@ async function loginWithEmail() {
 
 // Register with Email/Password
 async function registerWithEmail() {
-  const email = document.getElementById('login-email').value.trim();
-  const password = document.getElementById('login-password').value;
-  
-  if (!email || !password) {
-    showAuthError('Заполните все поля');
-    return;
-  }
-  if (password.length < 6) {
-    showAuthError('Пароль должен быть минимум 6 символов');
-    return;
-  }
-  
-  try {
-    // 1. Создаем пользователя в Firebase Auth
-    const userCredential = await auth.createUserWithEmailAndPassword(email, password);
-    const userId = userCredential.user.uid;
-
-    // 2. Сразу создаем документ в Firestore и сохраняем текущие локальные данные!
-    await db.collection('users').doc(userId).set({
-      email: email,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      songs: songs,               // Берем из локальной памяти
-      setlists: setlists,         // Берем из локальной памяти
-      teams: teams,               // Берем из локальной памяти
-      sectionNotes: sectionNotes, // Берем из локальной памяти
-      inlineComments: inlineComments // Берем из локальной памяти
-    });
-    
-    console.log('✅ Аккаунт создан, данные синхронизированы с облаком');
-    
-  } catch (error) {
-    showAuthError(getAuthErrorMessage(error.code));
-  }
+const email = document.getElementById('login-email').value.trim();
+const password = document.getElementById('login-password').value;
+if (!email || !password) {
+showAuthError('Заполните все поля');
+return;
+}
+if (password.length < 6) {
+showAuthError('Пароль должен быть минимум 6 символов');
+return;
+}
+try {
+// 1. Создаем пользователя в Firebase Auth
+const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+// 2. Отправляем письмо для подтверждения (требует интернет!)
+await userCredential.user.sendEmailVerification();
+alert('✅ Аккаунт создан! Пожалуйста, проверьте почту и перейдите по ссылке для подтверждения.');
+console.log('📧 Письмо для подтверждения отправлено на', email);
+// ❗ НЕ сохраняем данные в Firestore здесь! 
+// Данные попадут в облако автоматически через saveToStorage() 
+// только ПОСЛЕ того, как onAuthStateChanged разрешит вход.
+} catch (error) {
+showAuthError(getAuthErrorMessage(error.code));
+}
 }
 
 // Logout
@@ -756,6 +762,25 @@ async function logout() {
   if (confirm('Выйти из аккаунта?')) {
     await auth.signOut();
   }
+}
+
+// Reset password / Resend verification
+async function resetPassword() {
+    const email = document.getElementById('login-email').value.trim();
+    if (!email) {
+        showAuthError('Сначала введите email в поле выше');
+        return;
+    }
+    try {
+        await auth.sendPasswordResetEmail(email);
+        alert('✅ Письмо отправлено на ' + email + '\n\nПроверьте почту (включая спам). После перехода по ссылке ваш email будет автоматически подтверждён, и вы сможете войти.');
+    } catch (error) {
+        if (error.code === 'auth/user-not-found') {
+            showAuthError('Пользователь с таким email не найден');
+        } else {
+            showAuthError(getAuthErrorMessage(error.code));
+        }
+    }
 }
 
 // Show error
