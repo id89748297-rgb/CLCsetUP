@@ -440,12 +440,14 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// Enable offline persistence (как в Telegram!)
-db.enablePersistence().catch((err) => {
+// Enable offline persistence с синхронизацией между вкладками (как в Telegram!)
+db.enablePersistence({ synchronizeTabs: true }).catch((err) => {
   if (err.code === 'failed-precondition') {
-    console.log('Offline mode: multiple tabs not supported');
+    console.log('⚠️ Offline mode: multiple tabs open, persistence limited');
   } else if (err.code === 'unimplemented') {
-    console.log('Offline mode: browser not supported');
+    console.log('⚠️ Offline mode: browser not fully supported');
+  } else {
+    console.error('❌ Persistence error:', err);
   }
 });
 </script>
@@ -454,18 +456,16 @@ db.enablePersistence().catch((err) => {
 
 <!-- === AUTH PAGE === -->
 <div id="page-auth" class="page">
-  <div class="header">
-    <div class="header-left">
-      <button class="vl-worship-btn" onclick="showInstruction(true)" title="Инструкция">VL</button>
-    </div>
-    <div class="header-center">
-      <h1 class="app-title">Worship SetUP</h1>
-      <div class="app-subtitle">авторизация</div>
-    </div>
-    <div class="header-right">
-      <button class="theme-toggle" onclick="toggleTheme()" id="theme-btn">🌙</button>
-    </div>
-  </div>
+<div class="header">
+<div class="header-left"></div>
+<div class="header-center">
+<h1 class="app-title">Worship SetUP</h1>
+<div class="app-subtitle">авторизация</div>
+</div>
+<div class="header-right">
+<button class="theme-toggle" onclick="toggleTheme()" id="theme-btn">🌙</button>
+</div>
+</div>
   
   <div style="max-width: 400px; margin: 40px auto; padding: 20px;">
     <div style="text-align: center; margin-bottom: 30px;">
@@ -791,52 +791,56 @@ let currentUser = null;
 auth.onAuthStateChanged(async (user) => {
     const authPage = document.getElementById('page-auth');
     const homePage = document.getElementById('page-home');
+    const profilePage = document.getElementById('page-profile');
     const profileBtn = document.getElementById('profile-btn');
     
     if (user) {
+        // ✅ ПРОВЕРКА: Почта должна быть подтверждена
         if (!user.emailVerified) {
             currentUser = null;
             if (profileBtn) profileBtn.style.display = 'none';
-            if (authPage && homePage) {
-                homePage.classList.remove('active');
-                authPage.classList.add('active');
-            }
+            // ✅ СКРЫВАЕМ ВСЕ СТРАНИЦЫ И ПОКАЗЫВАЕМ АВТОРИЗАЦИЮ
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            if (authPage) authPage.classList.add('active');
             showAuthError(`⚠️ Почта не подтверждена! Проверьте ящик ${user.email}.`);
+            console.log(' Вход заблокирован: email не подтвержден');
             return;
         }
         currentUser = user;
         console.log('✅ Авторизован:', user.email);
         if (profileBtn) profileBtn.style.display = 'flex';
-        
         loadUserAvatar();
-        await registerSession();   // <-- НОВОЕ: регистрируем устройство
-        startCloudSync();          // <-- НОВОЕ: запускаем синхронизацию
-        
-        if (authPage && homePage) {
-            authPage.classList.remove('active');
-            homePage.classList.add('active');
-        }
+        loadUserDataFromCloud();
+        // ✅ ПОКАЗЫВАЕМ ГЛАВНУЮ (showPage сам скроет всё остальное)
+        showPage('page-home');
     } else {
         currentUser = null;
         console.log('❌ Не авторизован');
-        stopCloudSync();           // <-- НОВОЕ: останавливаем слушатели
+        if (profileBtn) profileBtn.style.display = 'none';
         resetAvatarsInUI();
-        if (authPage && homePage) {
-            homePage.classList.remove('active');
-            authPage.classList.add('active');
-        }
+        // ✅ ВАЖНО: СКРЫВАЕМ ВСЕ СТРАНИЦЫ И ПОКАЗЫВАЕМ ТОЛЬКО АВТОРИЗАЦИЮ
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        if (authPage) authPage.classList.add('active');
     }
 });
 
 // Обновленная функция выхода
 async function logout() {
     if (confirm('Выйти из аккаунта?')) {
-        stopCloudSync(); // Останавливаем слушатели перед выходом
+        // ✅ Останавливаем синхронизацию
+        if (typeof stopCloudSync === 'function') {
+            stopCloudSync();
+        }
+        // ✅ Очищаем сессию
         if (currentUser) {
-            // Удаляем запись о сессии из базы перед выходом
-            await db.collection('users').doc(currentUser.uid).collection('sessions').doc(currentSessionId).delete().catch(console.error);
+            try {
+                await db.collection('users').doc(currentUser.uid).collection('sessions').doc(currentSessionId).delete();
+            } catch (e) {
+                console.log('Сессия уже удалена или не существовала');
+            }
         }
         localStorage.removeItem('session_id');
+        // ✅ Firebase сам вызовет onAuthStateChanged(null) во ВСЕХ вкладках
         await auth.signOut();
     }
 }
@@ -2067,7 +2071,19 @@ document.querySelectorAll('.theme-toggle').forEach(b => b.innerText = icon);
 function saveAppState() { const activePage = document.querySelector('.page.active'); localStorage.setItem('clc_state', JSON.stringify({ page: activePage ? activePage.id : 'page-home', songId: currentSongId, slId: currentSlId, homeView: currentHomeView, tab: currentTab, carouselIdx: carouselActiveIndex })); }
 function saveDefaultSettings() { localStorage.setItem('clc_defaults', JSON.stringify({ fontSize, columns: currentColumns })); }
 function toggleColorTheme() { if (document.body.classList.contains('violet')) { document.body.classList.remove('violet'); localStorage.setItem('clc_color', 'blue'); } else { document.body.classList.add('violet'); localStorage.setItem('clc_color', 'violet'); } }
-function showPage(id) { document.querySelectorAll('.page').forEach(p => p.classList.remove('active')); document.getElementById(id).classList.add('active'); if(id === 'page-home') { activateCarouselItem(carouselActiveIndex); } window.scrollTo(0, 0); saveAppState(); }
+function showPage(id) {
+    // ✅ СКРЫВАЕМ ВСЕ СТРАНИЦЫ ПЕРЕД ПОКАЗОМ НОВОЙ
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    const targetPage = document.getElementById(id);
+    if (targetPage) {
+        targetPage.classList.add('active');
+    }
+    if(id === 'page-home') {
+        activateCarouselItem(carouselActiveIndex);
+    }
+    window.scrollTo(0, 0);
+    saveAppState();
+}
 function showInstruction(show) { if (show) { showPage('page-instruction'); } else { setCarouselIndex(0, true); showPage('page-home'); } }
 function closeModal(id) { document.getElementById(id).classList.remove('show'); }
 function fillKeySelect(selectId, selectedValue, showOriginal) {
@@ -3207,7 +3223,14 @@ track.style.transform = `translateX(${translateX}px)`;
 }
 }
 });
-if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').then(r => console.log('SW:', r.scope)).catch(console.error));
+// Безопасная регистрация Service Worker (только для http/https)
+if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(registration => console.log('✅ SW зарегистрирован:', registration.scope))
+      .catch(error => console.error('❌ Ошибка регистрации SW:', error));
+  });
+}
 </script>
 </body>
 </html>
