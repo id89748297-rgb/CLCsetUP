@@ -1005,6 +1005,11 @@ async function loadUserDataFromCloud() {
       if (data.teams) { teams = data.teams; localStorage.setItem('clc_teams', JSON.stringify(teams)); }
       if (data.sectionNotes) { sectionNotes = data.sectionNotes; localStorage.setItem('clc_section_notes', JSON.stringify(sectionNotes)); }
       if (data.inlineComments) { inlineComments = data.inlineComments; localStorage.setItem('clc_inline_comments', JSON.stringify(inlineComments)); }
+// === НОВОЕ: Загрузка аватарки ===
+if (data.avatar) {
+    localStorage.setItem('clc_avatar_' + currentUser.uid, data.avatar);
+    updateAvatarsInUI(data.avatar);
+}
       console.log('✅ Данные загружены из облака');
       renderSongs();
       renderSetlists();
@@ -1021,15 +1026,18 @@ async function loadUserDataFromCloud() {
 async function saveUserDataToCloud() {
     if (!currentUser) return;
     try {
+        // Получаем аватарку из localStorage
+        const localAvatar = localStorage.getItem('clc_avatar_' + currentUser.uid);
+        
         await db.collection('users').doc(currentUser.uid).set({
             songs: songs,
             setlists: setlists,
             teams: teams,
             sectionNotes: sectionNotes,
             inlineComments: inlineComments,
+            avatar: localAvatar || null,  // === НОВОЕ: Сохраняем аватарку ===
             lastSync: firebase.firestore.FieldValue.serverTimestamp()
-        }, { merge: true }); // ✅ ИСПРАВЛЕНО: merge: true сохраняет аватарку
-        
+        }, { merge: true });
         console.log('✅ Данные сохранены в облако');
     } catch (error) {
         console.error('❌ Ошибка сохранения:', error);
