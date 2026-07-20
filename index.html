@@ -788,36 +788,29 @@ db.enablePersistence().catch((err) => {
 // === FIREBASE AUTHENTICATION ===
 let currentUser = null;
 
-// Listen for auth state changes (как в Telegram!)
 auth.onAuthStateChanged(async (user) => {
     const authPage = document.getElementById('page-auth');
     const homePage = document.getElementById('page-home');
     const profileBtn = document.getElementById('profile-btn');
     
     if (user) {
-        // ✅ ПРОВЕРКА: Почта должна быть подтверждена
         if (!user.emailVerified) {
-            currentUser = null; 
-            // Показываем кнопку профиля как скрытую, если почта не подтверждена
-            if (profileBtn) profileBtn.style.display = 'none'; 
-            
+            currentUser = null;
+            if (profileBtn) profileBtn.style.display = 'none';
             if (authPage && homePage) {
                 homePage.classList.remove('active');
                 authPage.classList.add('active');
             }
             showAuthError(`⚠️ Почта не подтверждена! Проверьте ящик ${user.email}.`);
-            console.log('🔒 Вход заблокирован: email не подтвержден');
             return;
         }
-        
         currentUser = user;
         console.log('✅ Авторизован:', user.email);
+        if (profileBtn) profileBtn.style.display = 'flex';
         
-        // ✅ ИСПРАВЛЕНИЕ: Показываем кнопку профиля
-        if (profileBtn) profileBtn.style.display = 'flex'; 
-        
-        loadUserAvatar();  
-        loadUserDataFromCloud();
+        loadUserAvatar();
+        await registerSession();   // <-- НОВОЕ: регистрируем устройство
+        startCloudSync();          // <-- НОВОЕ: запускаем синхронизацию
         
         if (authPage && homePage) {
             authPage.classList.remove('active');
@@ -826,17 +819,27 @@ auth.onAuthStateChanged(async (user) => {
     } else {
         currentUser = null;
         console.log('❌ Не авторизован');
-        
-        // ✅ ИСПРАВЛЕНИЕ: Скрываем кнопку профиля при выходе
-        if (profileBtn) profileBtn.style.display = 'none'; 
-        
-        resetAvatarsInUI();  
+        stopCloudSync();           // <-- НОВОЕ: останавливаем слушатели
+        resetAvatarsInUI();
         if (authPage && homePage) {
             homePage.classList.remove('active');
             authPage.classList.add('active');
         }
     }
 });
+
+// Обновленная функция выхода
+async function logout() {
+    if (confirm('Выйти из аккаунта?')) {
+        stopCloudSync(); // Останавливаем слушатели перед выходом
+        if (currentUser) {
+            // Удаляем запись о сессии из базы перед выходом
+            await db.collection('users').doc(currentUser.uid).collection('sessions').doc(currentSessionId).delete().catch(console.error);
+        }
+        localStorage.removeItem('session_id');
+        await auth.signOut();
+    }
+}
 
 // Sign in with Google
 async function signInWithGoogle() {
@@ -947,6 +950,47 @@ function showRegisterForm() {
   }
 }
 
+// === УПРАВЛЕНИЕ СЕССИЯМИ (УСТРОЙСТВАМИ) ===
+let currentSessionId = localStorage.getItem('session_id');
+if (!currentSessionId) {
+    currentSessionId = window.crypto.randomUUID ? window.crypto.randomUUID() : Date.now().toString();
+    localStorage.setItem('session_id', currentSessionId);
+}
+
+let unsubscribeSessionWatch = null;
+
+async function registerSession() {
+    if (!currentUser) return;
+    const deviceLabel = /Mobi|Android/i.test(navigator.userAgent) ? "📱 Мобильное устройство" : "💻 Компьютер";
+    
+    await db.collection('users').doc(currentUser.uid).collection('sessions').doc(currentSessionId).set({
+        deviceLabel: deviceLabel,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        lastActive: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    if (unsubscribeSessionWatch) unsubscribeSessionWatch();
+    unsubscribeSessionWatch = db.collection('users').doc(currentUser.uid).collection('sessions').doc(currentSessionId)
+        .onSnapshot((doc) => {
+            if (!doc.exists) {
+                console.log("Сессия удалена удаленно. Выполняется выход...");
+                auth.signOut();
+                alert("Эта сессия была завершена с другого устройства.");
+            }
+        });
+}
+
+async function revokeSession(sessionId) {
+    if (!currentUser) return;
+    await db.collection('users').doc(currentUser.uid).collection('sessions').doc(sessionId).delete();
+    renderProfile(); 
+}
+
+async function loadSessionsForProfile() {
+    if (!currentUser) return [];
+    const snapshot = await db.collection('users').doc(currentUser.uid).collection('sessions').get();
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
 // === CLOUD DATA SYNC ===
 
 // Load user data from cloud
@@ -991,7 +1035,56 @@ async function saveUserDataToCloud() {
         console.error('❌ Ошибка сохранения:', error);
     }
 }
+// === ОБЛАЧНАЯ СИНХРОНИЗАЦИЯ В РЕАЛЬНОМ ВРЕМЕНИ ===
+let unsubscribeCloudSync = null;
 
+function startCloudSync() {
+    if (!currentUser || unsubscribeCloudSync) return;
+    
+    unsubscribeCloudSync = db.collection('users').doc(currentUser.uid)
+        .onSnapshot((doc) => {
+            if (doc.exists) {
+                const data = doc.data();
+                let needsRender = false;
+
+                if (data.songs && JSON.stringify(data.songs) !== JSON.stringify(songs)) {
+                    songs = data.songs; needsRender = true;
+                }
+                if (data.setlists && JSON.stringify(data.setlists) !== JSON.stringify(setlists)) {
+                    setlists = data.setlists; needsRender = true;
+                }
+                if (data.teams && JSON.stringify(data.teams) !== JSON.stringify(teams)) {
+                    teams = data.teams; needsRender = true;
+                }
+                if (data.sectionNotes) { sectionNotes = data.sectionNotes; needsRender = true; }
+                if (data.inlineComments) { inlineComments = data.inlineComments; needsRender = true; }
+                if (data.avatar && !localStorage.getItem('clc_avatar_' + currentUser.uid)) {
+                    localStorage.setItem('clc_avatar_' + currentUser.uid, data.avatar);
+                    updateAvatarsInUI(data.avatar);
+                }
+
+                if (needsRender) {
+                    originalSaveToStorage(); 
+                    renderSongs();
+                    renderSetlists();
+                    console.log("✅ Данные синхронизированы из облака в реальном времени");
+                }
+            }
+        }, (error) => {
+            console.error("Ошибка синхронизации:", error);
+        });
+}
+
+function stopCloudSync() {
+    if (unsubscribeCloudSync) {
+        unsubscribeCloudSync();
+        unsubscribeCloudSync = null;
+    }
+    if (unsubscribeSessionWatch) {
+        unsubscribeSessionWatch();
+        unsubscribeSessionWatch = null;
+    }
+}
 // === ГЕНЕРАЦИЯ УНИКАЛЬНОГО ID ===
 function generateCloudId() {
 return 'song_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
@@ -2838,7 +2931,7 @@ function goBackFromProfile() {
     activateCarouselItem(carouselActiveIndex);
 }
 
-function renderProfile() {
+async function renderProfile() {
     if (!currentUser) return;
     const avatarEl = document.getElementById('profile-avatar');
     const nameEl = document.getElementById('profile-name');
@@ -2846,7 +2939,7 @@ function renderProfile() {
     const providerEl = document.getElementById('profile-provider');
     const btnChangePass = document.getElementById('btn-change-password');
     const btnVerify = document.getElementById('btn-verify-email');
-
+    
     const localAvatar = localStorage.getItem('clc_avatar_' + currentUser.uid);
     const avatarUrl = localAvatar || currentUser.photoURL;
     if (avatarUrl) {
@@ -2858,10 +2951,38 @@ function renderProfile() {
     emailEl.innerText = currentUser.email || '—';
     const providers = currentUser.providerData.map(p => p.providerId).join(', ');
     providerEl.innerText = providers.includes('google') ? 'Google' : 'Email / Пароль';
+    
     if (providers.includes('password')) btnChangePass.style.display = 'block';
     else btnChangePass.style.display = 'none';
     if (!currentUser.emailVerified) btnVerify.style.display = 'block';
     else btnVerify.style.display = 'none';
+
+    // === НОВОЕ: Отображение активных сессий ===
+    const profileActions = document.querySelector('.profile-actions');
+    const oldList = document.getElementById('sessions-list-profile');
+    if (oldList) oldList.remove();
+
+    const sessions = await loadSessionsForProfile();
+    let sessionsHtml = `<div style="margin-top: 25px; border-top: 1px solid #333; padding-top: 15px;">
+        <h3 style="font-size: 16px; margin-bottom: 15px; color: #90caf9;">📱 Активные устройства</h3>
+        <div id="sessions-list-profile" style="display: flex; flex-direction: column; gap: 10px;">`;
+    
+    sessions.forEach(s => {
+        const isCurrent = s.id === currentSessionId;
+        sessionsHtml += `
+        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(144, 202, 249, 0.1); padding: 10px; border-radius: 8px;">
+            <div style="font-size: 14px; color: #eee;">
+                ${s.deviceLabel} 
+                ${isCurrent ? '<span style="color: #4caf50; font-size: 12px;">(это устройство)</span>' : ''}
+           300px; max-width: 100%; word-break: break-all;">
+                ${s.id.substring(0, 8)}...
+            </div>
+            ${!isCurrent ? `<button class="btn-danger" style="padding: 6px 12px; font-size: 12px; min-height: auto; border-radius: 6px;" onclick="revokeSession('${s.id}')">Завершить</button>` : ''}
+        </div>`;
+    });
+    sessionsHtml += `</div></div>`;
+    
+    profileActions.insertAdjacentHTML('beforebegin', sessionsHtml);
 }
 
 async function changePassword() {
