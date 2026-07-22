@@ -430,6 +430,29 @@ body.light .profile-info-row { border-bottom-color: #eee; }
 .profile-value { color: #90caf9; font-size: 14px; text-align: right; word-break: break-all; }
 body.light .profile-value { color: #0d47a1; }
 .profile-actions { display: flex; flex-direction: column; gap: 12px; }
+.profile-edit-input {
+transition: border-color 0.2s;
+}
+.profile-edit-input:focus {
+outline: none;
+border-color: #90caf9 !important;
+}
+.profile-edit-input option {
+background: #1e1e1e;
+color: #eee;
+}
+body.light .profile-edit-input option {
+background: white;
+color: #333;
+}
+.profile-edit-input::placeholder {
+color: #666;
+}
+.sessions-header-profile {
+margin-top: 25px; 
+border-top: 1px solid #333; 
+padding-top: 15px;
+}
 /* === КНОПКА ОБНОВЛЕНИЯ === */
 .btn-refresh-round {
 background: #9575cd;
@@ -693,21 +716,65 @@ db.enablePersistence({ synchronizeTabs: true }).catch((err) => {
             <div style="font-size:12px; color:#888; margin-top:8px; text-align:center;">Нажмите, чтобы изменить фото</div>
         </div>
         <input type="file" id="avatar-upload-input" accept="image/*" style="display:none;" onchange="handleAvatarUpload(event)">
-        <div class="profile-info-card">
-            <div class="profile-info-row">
-                <span class="profile-label">Имя:</span>
-                <span class="profile-value" id="profile-name">Не указано</span>
-            </div>
-            <div class="profile-info-row">
-                <span class="profile-label">Email:</span>
-                <span class="profile-value" id="profile-email">—</span>
-            </div>
-            <div class="profile-info-row">
-                <span class="profile-label">Вход через:</span>
-                <span class="profile-value" id="profile-provider">—</span>
-            </div>
-        </div>
-        <div class="profile-actions">
+       <div class="profile-info-card">
+<div class="profile-info-row">
+<span class="profile-label">Имя:</span>
+<input type="text" id="profile-name-input" class="profile-edit-input"
+value="" placeholder="Введите имя"
+style="text-align: right; background: transparent; border: 1px solid #444; color: #90caf9; font-size: 14px; padding: 6px 10px; border-radius: 6px; max-width: 200px;">
+</div>
+<div class="profile-info-row">
+<span class="profile-label">Фамилия:</span>
+<input type="text" id="profile-lastname-input" class="profile-edit-input"
+value="" placeholder="Не указана"
+style="text-align: right; background: transparent; border: 1px solid #444; color: #90caf9; font-size: 14px; padding: 6px 10px; border-radius: 6px; max-width: 200px;">
+</div>
+<div class="profile-info-row">
+<span class="profile-label">Пол:</span>
+<select id="profile-gender-input" class="profile-edit-input"
+style="text-align: right; background: #1e1e1e; border: 1px solid #444; color: #90caf9; font-size: 14px; padding: 6px 10px; border-radius: 6px; max-width: 200px;">
+<option value="">Не указан</option>
+<option value="male">👨 Мужской</option>
+<option value="female">👩 Женский</option>
+</select>
+</div>
+<div class="profile-info-row">
+<span class="profile-label">День рождения 🥳:</span>
+<input type="date" id="profile-birthday-input" class="profile-edit-input"
+style="text-align: right; background: #1e1e1e; border: 1px solid #444; color: #90caf9; font-size: 14px; padding: 6px 10px; border-radius: 6px; max-width: 200px;">
+</div>
+<div class="profile-info-row">
+<span class="profile-label">Страна:</span>
+<input type="text" id="profile-country-input" class="profile-edit-input"
+value="" placeholder="Не указана"
+style="text-align: right; background: transparent; border: 1px solid #444; color: #90caf9; font-size: 14px; padding: 6px 10px; border-radius: 6px; max-width: 200px;">
+</div>
+<div class="profile-info-row">
+<span class="profile-label">Город:</span>
+<input type="text" id="profile-city-input" class="profile-edit-input"
+value="" placeholder="Не указан"
+style="text-align: right; background: transparent; border: 1px solid #444; color: #90caf9; font-size: 14px; padding: 6px 10px; border-radius: 6px; max-width: 200px;">
+</div>
+<div class="profile-info-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+<span class="profile-label">О себе:</span>
+<textarea id="profile-about-input" class="profile-edit-input"
+placeholder="Расскажите о себе..."
+rows="3"
+style="width: 100%; background: #1e1e1e; border: 1px solid #444; color: #eee; font-size: 14px; padding: 10px; border-radius: 6px; resize: vertical; font-family: inherit;"></textarea>
+</div>
+<div class="profile-info-row">
+<span class="profile-label">Email:</span>
+<span class="profile-value" id="profile-email">—</span>
+</div>
+<div class="profile-info-row">
+<span class="profile-label">Вход через:</span>
+<span class="profile-value" id="profile-provider">—</span>
+</div>
+</div>
+<button class="btn-main" onclick="saveProfileChanges()" style="margin-bottom: 15px;">
+💾 Сохранить изменения
+</button>
+<div class="profile-actions">
             <button class="btn-main" id="btn-change-password" onclick="changePassword()" style="display: none;">🔑 Сменить пароль</button>
             <button class="btn-secondary" onclick="sendVerificationEmail()" id="btn-verify-email" style="display: none; background: #ff9800;">📧 Подтвердить Email</button>
             <button class="btn-danger" onclick="logout()" style="width: 100%; margin-top: 10px;">🚪 Выйти из аккаунта</button>
@@ -987,13 +1054,6 @@ showAuthError(getAuthErrorMessage(error.code));
 }
 }
 
-// Logout
-async function logout() {
-  if (confirm('Выйти из аккаунта?')) {
-    await auth.signOut();
-  }
-}
-
 // Reset password / Resend verification
 async function resetPassword() {
     const email = document.getElementById('login-email').value.trim();
@@ -1015,34 +1075,28 @@ async function resetPassword() {
 
 // Повторная отправка письма подтверждения
 async function resendVerification() {
-const email = document.getElementById('login-email').value.trim();
-if (!email) {
-showAuthError('Сначала введите email в поле выше');
-return;
-}
-try {
-// Получаем способы входа для этого email
-const methods = await auth.fetchSignInMethodsForEmail(email);
-if (methods.length === 0) {
-showAuthError('Пользователь с таким email не найден');
-return;
-}
-// Отправляем письмо подтверждения (работает только если пользователь уже существует)
-await auth.sendSignInLinkToEmail(email, {
-url: window.location.href,
-handleCodeInApp: false
-});
-alert('✅ Письмо отправлено на ' + email + '\nПроверьте почту (включая спам).');
-} catch (error) {
-if (error.code === 'auth/user-not-found') {
-showAuthError('Пользователь с таким email не найден');
-} else if (error.code === 'auth/invalid-email') {
-showAuthError('Неверный формат email');
-} else {
-// Если метод не поддерживается, пробуем другой способ
-alert('ℹ️ Если аккаунт существует, письмо отправлено на ' + email + '\nПроверьте почту (включая спам).\n\nЕсли письмо не приходит — попробуйте сбросить пароль.');
-}
-}
+  if (auth.currentUser) {
+    try {
+      await auth.currentUser.sendEmailVerification();
+      alert('✅ Письмо подтверждения отправлено на ' + auth.currentUser.email + '\nПроверьте почту (включая спам).');
+    } catch (error) {
+      showAuthError(getAuthErrorMessage(error.code));
+    }
+    return;
+  }
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  if (!email || !password) {
+    showAuthError('Введите email и пароль в поля выше, затем нажмите ещё раз');
+    return;
+  }
+  try {
+    const cred = await auth.signInWithEmailAndPassword(email, password);
+    await cred.user.sendEmailVerification();
+    alert('✅ Письмо подтверждения отправлено на ' + email + '\nПроверьте почту (включая спам).');
+  } catch (error) {
+    showAuthError(getAuthErrorMessage(error.code));
+  }
 }
 
 // Show error
@@ -3108,57 +3162,83 @@ function goBackFromProfile() {
 }
 
 async function renderProfile() {
-    if (!currentUser) return;
-    const avatarEl = document.getElementById('profile-avatar');
-    const nameEl = document.getElementById('profile-name');
-    const emailEl = document.getElementById('profile-email');
-    const providerEl = document.getElementById('profile-provider');
-    const btnChangePass = document.getElementById('btn-change-password');
-    const btnVerify = document.getElementById('btn-verify-email');
-    
-    const localAvatar = localStorage.getItem('clc_avatar_' + currentUser.uid);
-    const avatarUrl = localAvatar || currentUser.photoURL;
-    if (avatarUrl) {
-        avatarEl.innerHTML = `<img src="${avatarUrl}" alt="Avatar">`;
-    } else {
-        avatarEl.innerHTML = '👤';
-    }
-    nameEl.innerText = currentUser.displayName || 'Не указано';
-    emailEl.innerText = currentUser.email || '—';
-    const providers = currentUser.providerData.map(p => p.providerId).join(', ');
-    providerEl.innerText = providers.includes('google') ? 'Google' : 'Email / Пароль';
-    
-    if (providers.includes('password')) btnChangePass.style.display = 'block';
-    else btnChangePass.style.display = 'none';
-    if (!currentUser.emailVerified) btnVerify.style.display = 'block';
-    else btnVerify.style.display = 'none';
+if (!currentUser) return;
+const avatarEl = document.getElementById('profile-avatar');
+const emailEl = document.getElementById('profile-email');
+const providerEl = document.getElementById('profile-provider');
+const btnChangePass = document.getElementById('btn-change-password');
+const btnVerify = document.getElementById('btn-verify-email');
+const localAvatar = localStorage.getItem('clc_avatar_' + currentUser.uid);
+const avatarUrl = localAvatar || currentUser.photoURL;
+if (avatarUrl) {
+avatarEl.innerHTML = `<img src="${avatarUrl}" alt="Avatar">`;
+} else {
+avatarEl.innerHTML = '👤';
+}
+emailEl.innerText = currentUser.email || '—';
+const providers = currentUser.providerData.map(p => p.providerId).join(', ');
+providerEl.innerText = providers.includes('google') ? 'Google' : 'Email / Пароль';
+if (providers.includes('password')) btnChangePass.style.display = 'block';
+else btnChangePass.style.display = 'none';
+if (!currentUser.emailVerified) btnVerify.style.display = 'block';
+else btnVerify.style.display = 'none';
 
-    // === НОВОЕ: Отображение активных сессий ===
-    const profileActions = document.querySelector('.profile-actions');
-    const oldList = document.getElementById('sessions-list-profile');
-    if (oldList) oldList.remove();
+// ✅ ЗАГРУЖАЕМ ДАННЫЕ ПРОФИЛЯ ИЗ FIRESTORE
+try {
+const userDoc = await db.collection('users').doc(currentUser.uid).get();
+if (userDoc.exists) {
+const data = userDoc.data();
+const nameInput = document.getElementById('profile-name-input');
+if (nameInput) nameInput.value = data.displayName || currentUser.displayName || '';
+const lastnameInput = document.getElementById('profile-lastname-input');
+if (lastnameInput) lastnameInput.value = data.lastName || '';
+const genderInput = document.getElementById('profile-gender-input');
+if (genderInput) genderInput.value = data.gender || '';
+const birthdayInput = document.getElementById('profile-birthday-input');
+if (birthdayInput) birthdayInput.value = data.birthDate || '';
+const countryInput = document.getElementById('profile-country-input');
+if (countryInput) countryInput.value = data.country || '';
+const cityInput = document.getElementById('profile-city-input');
+if (cityInput) cityInput.value = data.city || '';
+const aboutInput = document.getElementById('profile-about-input');
+if (aboutInput) aboutInput.value = data.aboutMe || '';
+}
+} catch (err) {
+console.error('Ошибка загрузки профиля:', err);
+}
 
-    const sessions = await loadSessionsForProfile();
-    let sessionsHtml = `<div style="margin-top: 25px; border-top: 1px solid #333; padding-top: 15px;">
-        <h3 style="font-size: 16px; margin-bottom: 15px; color: #90caf9;">📱 Активные устройства</h3>
-        <div id="sessions-list-profile" style="display: flex; flex-direction: column; gap: 10px;">`;
-    
-    sessions.forEach(s => {
-        const isCurrent = s.id === currentSessionId;
-        sessionsHtml += `
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(144, 202, 249, 0.1); padding: 10px; border-radius: 8px;">
-            <div style="font-size: 14px; color: #eee;">
-                ${s.deviceLabel} 
-                ${isCurrent ? '<span style="color: #4caf50; font-size: 12px;">(это устройство)</span>' : ''}
-           300px; max-width: 100%; word-break: break-all;">
-                ${s.id.substring(0, 8)}...
-            </div>
-            ${!isCurrent ? `<button class="btn-danger" style="padding: 6px 12px; font-size: 12px; min-height: auto; border-radius: 6px;" onclick="revokeSession('${s.id}')">Завершить</button>` : ''}
-        </div>`;
-    });
-    sessionsHtml += `</div></div>`;
-    
-    profileActions.insertAdjacentHTML('beforebegin', sessionsHtml);
+// === Отображение активных сессий ===
+const oldList = document.getElementById('sessions-list-profile');
+if (oldList) oldList.remove();
+const oldHeader = document.querySelector('.sessions-header-profile');
+if (oldHeader) oldHeader.remove();
+const sessions = await loadSessionsForProfile();
+let sessionsHtml = `
+<div class="sessions-header-profile" style="margin-top: 25px; border-top: 1px solid #333; padding-top: 15px;">
+<h3 style="font-size: 16px; margin-bottom: 15px; color: #90caf9;">📱 Активные устройства</h3>
+<div id="sessions-list-profile" style="display: flex; flex-direction: column; gap: 10px;">
+`;
+if (sessions.length === 0) {
+sessionsHtml += `<div style="color: #888; text-align: center; padding: 20px;">Нет активных устройств</div>`;
+} else {
+sessions.forEach(s => {
+const isCurrent = s.id === currentSessionId;
+sessionsHtml += `
+<div style="display: flex; justify-content: space-between; align-items: center; background: rgba(144, 202, 249, 0.1); padding: 10px; border-radius: 8px;">
+<div style="font-size: 14px; color: #eee; flex: 1;">
+${s.deviceLabel}
+ ${isCurrent ? '<span style="color: #4caf50; font-size: 12px;">(это устройство)</span>' : ''}
+                <div style="font-size: 11px; color: #666; width: 300px; max-width: 100%; word-break: break-all;">
+                    ${s.id.substring(0, 8)}...
+                </div>
+</div>
+${!isCurrent ? `<button class="btn-danger" style="padding: 6px 12px; font-size: 12px; min-height: auto; border-radius: 6px;" onclick="revokeSession('${s.id}')">Завершить</button>` : ''}
+</div>`;
+});
+}
+sessionsHtml += `</div></div>`;
+const profileActions = document.querySelector('.profile-actions');
+profileActions.insertAdjacentHTML('beforebegin', sessionsHtml);
 }
 
 async function changePassword() {
@@ -3382,6 +3462,42 @@ if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || wi
       .then(registration => console.log('✅ SW зарегистрирован:', registration.scope))
       .catch(error => console.error('❌ Ошибка регистрации SW:', error));
   });
+}
+async function saveProfileChanges() {
+const name = document.getElementById('profile-name-input').value.trim();
+const lastname = document.getElementById('profile-lastname-input').value.trim();
+const gender = document.getElementById('profile-gender-input').value;
+const birthDate = document.getElementById('profile-birthday-input').value;
+const country = document.getElementById('profile-country-input').value.trim();
+const city = document.getElementById('profile-city-input').value.trim();
+const about = document.getElementById('profile-about-input').value.trim();
+
+if (!name) {
+alert('❌ Введите хотя бы имя!');
+return;
+}
+
+try {
+// ✅ Обновляем displayName в Firebase Auth
+await currentUser.updateProfile({ displayName: name });
+
+// ✅ Сохраняем ВСЕ поля в Firestore
+await db.collection('users').doc(currentUser.uid).set({
+displayName: name,
+lastName: lastname,
+gender: gender,
+birthDate: birthDate,
+country: country,
+city: city,
+aboutMe: about,
+updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+}, { merge: true });
+
+alert('✅ Все изменения сохранены!');
+renderProfile(); // Перерисовываем профиль
+} catch (error) {
+alert('❌ Ошибка: ' + error.message);
+}
 }
 // === ФУНКЦИЯ ОБНОВЛЕНИЯ СТРАНИЦЫ ===
 function refreshPage(btnEl) {
