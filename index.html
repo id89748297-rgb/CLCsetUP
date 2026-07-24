@@ -1307,6 +1307,10 @@ function stopCloudSync() {
 function generateCloudId() {
 return 'song_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
 }
+// === ГЕНЕРАЦИЯ УНИКАЛЬНОГО ЧИСЛОВОГО ID ===
+function getNextId(arr) {
+  return Date.now() * 1000 + Math.floor(Math.random() * 1000);
+}
 function formatDate(dateString) { const date = new Date(dateString); const months = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']; return `${date.getDate()} ${months[date.getMonth()]}`; }
 function formatSetlistDate(dateString, timeString) { let result = formatDate(dateString); if (timeString) result += `, ${timeString}`; return result; }
 function getCurrentDate() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
@@ -1831,17 +1835,11 @@ return;
 }
 document.getElementById('join-team-link-input').value = '';
 document.getElementById('join-team-password-input').value = '';
-document.getElementById('join-team-password-row').style.display = 'none';
+document.getElementById('join-team-password-row').style.display = 'block';
 document.getElementById('modal-join-team-link').classList.add('show');
 }
 function onJoinLinkInput() {
-const link = document.getElementById('join-team-link-input').value.trim();
-const parsed = parseTeamLink(link);
-if (parsed && parsed.hasPwd) {
-document.getElementById('join-team-password-row').style.display = 'block';
-} else {
-document.getElementById('join-team-password-row').style.display = 'none';
-}
+// Поле пароля теперь всегда видно — определять по ссылке больше не требуется
 }
 function parseTeamLink(link) {
 if (!link) return null;
@@ -1860,28 +1858,20 @@ return null;
 function submitJoinTeam() {
 const link = document.getElementById('join-team-link-input').value.trim();
 if (!link) {
-alert('❌ Вставьте ссылку-приглашение или ID команды');
+alert('❌ Введите ID команды или вставьте ссылку-приглашение');
 return;
 }
 const parsed = parseTeamLink(link);
 if (!parsed || !parsed.teamId) {
-alert('❌ Неверная ссылка. Используйте ссылку из кнопки «🔗 Пригласить»');
+alert('❌ Не удалось распознать ID команды. Проверьте, что скопировали его полностью.');
 return;
 }
 if (teams.find(t => t.id === parsed.teamId)) {
 alert('️ Эта команда уже добавлена');
 return;
 }
-if (parsed.hasPwd) {
 const pwd = document.getElementById('join-team-password-input').value;
-if (!pwd) {
-alert('❌ Введите пароль');
-return;
-}
 confirmJoinTeam(parsed.teamId, pwd);
-} else {
-confirmJoinTeam(parsed.teamId, '');
-}
 }
 function confirmJoinTeam(teamId, password) {
 if (teams.length >= MAX_TEAMS) {
@@ -1916,7 +1906,7 @@ document.getElementById('modal-setlist').classList.add('show');
 function copySetlistToPersonal(setlistId) {
 const sl = setlists.find(x => x.id === setlistId);
 if (!sl) return;
-const newId = setlists.length > 0 ? setlists.reduce((max, s) => Math.max(max, s.id), 0) + 1 : 1;
+const newId = getNextId(setlists);
 const newSl = {
 id: newId,
 date: sl.date,
@@ -2019,7 +2009,7 @@ const name = prompt('Название сет-листа:');
 if (!name || !name.trim()) return;
 const date = prompt('Дата (ДД.ММ.ГГГГ):', new Date().toLocaleDateString('ru-RU'));
 if (!date) return;
-const newId = setlists.length > 0 ? Math.max(...setlists.map(s => s.id)) + 1 : 1;
+const newId = getNextId(setlists);
 setlists.push({
 id: newId, date: date.trim(), time: '', name: name.trim(),
 isArchived: false, teamId: teamId, songs: []
@@ -2102,7 +2092,7 @@ renderSetlists();
 renderCarousel();
 alert(`✅ Сет-лист «${sl.name}» обновлён в команде «${team.name}»!`);
 } else {
-const newSlId = setlists.length > 0 ? setlists.reduce((max, s) => Math.max(max, s.id), 0) + 1 : 1;
+const newSlId = getNextId(setlists);
 setlists.push({
 id: newSlId,
 date: sl.date,
@@ -2340,7 +2330,7 @@ const countLabel = document.getElementById('songs-count-label');
 const countText = categoryFilter === 'fast' ? '🔥 Быстрые' : categoryFilter === 'medium' ? '🎵 Средние' : categoryFilter === 'slow' ? '🧎 Медленные' : categoryFilter === 'none' ? 'Без категории' : 'Все песни';
 if (countLabel) countLabel.innerText = countText;
 document.getElementById('songs-count').innerText = sorted.length;
-sorted.forEach(s => { const keyLabel = s.key ? ` <span style="color:#90caf9; font-size:12px;">[${s.key}]</span>` : ''; const authorText = s.author ? `<div style="color:#888; font-size:8px;">${s.author}</div>` : ''; const categoryIcon = s.category && CATEGORY_ICONS[s.category] ? `<div style="display: flex; flex-direction: column; align-items: center; margin-left: 8px;"><div style="font-size: 18px;">${CATEGORY_ICONS[s.category]}</div>${s.bpm ? `<div style="color:#888; font-size:8px;">${s.bpm} BPM</div>` : ''}</div>` : (s.bpm ? `<div style="display: flex; flex-direction: column; align-items: center; margin-left: 8px;"><div style="color:#888; font-size:8px;">${s.bpm} BPM</div></div>` : ''); const div = document.createElement('div'); div.className = 'list-item'; div.style.cursor = 'default'; div.innerHTML = `<div class="item-left" style="min-width: 0; flex: 1; display: flex; align-items: center;"><div style="min-width: 0; flex: 1;"><div class="item-title" style="max-height: 2.6em; line-height: 1.3;">${s.title}${keyLabel}</div>${authorText}</div>${categoryIcon}</div><div class="item-actions" style="display: flex; gap: 4px;"><button class="btn-icon" onclick="event.stopPropagation(); openMainSongEditor(${s.id})">✏️</button><button class="btn-icon" onclick="event.stopPropagation(); confirmDeleteSong(${s.id}, '${s.title.replace(/'/g, "\\'")}')">🗑️</button></div>`; div.onclick = () => clearSearchAndOpenSong(s.id); list.appendChild(div); const titleEl = div.querySelector('.item-title'); if (titleEl && titleEl.scrollHeight > titleEl.clientHeight) { titleEl.style.fontSize = '12px'; } });
+sorted.forEach(s => { const keyLabel = s.key ? ` <span style="color:#90caf9; font-size:12px;">[${s.key}]</span>` : ''; const authorText = s.author ? `<div style="color:#888; font-size:8px;">${escapeHtml(s.author)}</div>` : ''; const categoryIcon = s.category && CATEGORY_ICONS[s.category] ? `<div style="display: flex; flex-direction: column; align-items: center; margin-left: 8px;"><div style="font-size: 18px;">${CATEGORY_ICONS[s.category]}</div>${s.bpm ? `<div style="color:#888; font-size:8px;">${s.bpm} BPM</div>` : ''}</div>` : (s.bpm ? `<div style="display: flex; flex-direction: column; align-items: center; margin-left: 8px;"><div style="color:#888; font-size:8px;">${s.bpm} BPM</div></div>` : ''); const div = document.createElement('div'); div.className = 'list-item'; div.style.cursor = 'default'; div.innerHTML = `<div class="item-left" style="min-width: 0; flex: 1; display: flex; align-items: center;"><div style="min-width: 0; flex: 1;"><div class="item-title" style="max-height: 2.6em; line-height: 1.3;">${escapeHtml(s.title)}${keyLabel}</div>${authorText}</div>${categoryIcon}</div><div class="item-actions" style="display: flex; gap: 4px;"><button class="btn-icon" onclick="event.stopPropagation(); openMainSongEditor(${s.id})">✏️</button><button class="btn-icon" onclick="event.stopPropagation(); confirmDeleteSong(${s.id}, '${s.title.replace(/'/g, "\\'")}')">🗑️</button></div>`; div.onclick = () => clearSearchAndOpenSong(s.id); list.appendChild(div); const titleEl = div.querySelector('.item-title'); if (titleEl && titleEl.scrollHeight > titleEl.clientHeight) { titleEl.style.fontSize = '12px'; } });
 updateCarouselBadges();
 }
 function confirmDeleteSong(id, name) { showDeleteConfirm('song', id, `Песню "${name}"`, () => { songs = songs.filter(s => s.id !== id); setlists.forEach(sl => sl.songs = sl.songs.filter(x => x.id !== id)); if (sectionNotes[id]) delete sectionNotes[id]; if (inlineComments[id]) delete inlineComments[id]; saveToStorage(); renderSongs(); }); }
@@ -2356,7 +2346,6 @@ document.getElementById('edit-title').value = title; document.getElementById('ed
 function saveSong() {
 const title = document.getElementById('edit-title').value.trim(); const author = document.getElementById('edit-author').value.trim(); const bpm = document.getElementById('edit-bpm').value.trim(); const category = document.getElementById('edit-category').value; const chordpro = document.getElementById('edit-text').value; const key = document.getElementById('edit-key').value;
 if (!title) { alert('Введите название!'); return; } if (!key) { alert('Выберите тональность!'); return; } if (!chordpro.trim()) { alert('Введите текст!'); return; }
-function getNextId(arr) { return arr.length === 0 ? 1 : arr.reduce((max, item) => Math.max(max, item.id), 0) + 1; }
 const existingSong = songs.find(s => s.title.toLowerCase() === title.toLowerCase() && s.id !== currentSongId);
 if (existingSong) { alert(`⚠️ Песня "${title}" уже существует!`); return; }
 if (isLocalEdit && currentSlId) { const sl = setlists.find(x => x.id === currentSlId); const item = sl.songs.find(x => x.id === currentSongId); if (item) item.chordpro = chordpro; saveToStorage(); alert('✅ Сохранено локально!'); }
@@ -2404,8 +2393,8 @@ filtered.forEach(sl => { const div = document.createElement('div'); div.classNam
 const isExpired = !sl.isArchived && isSetlistExpired(sl);
 const expiredClass = isExpired ? 'setlist-expired' : '';
 const sharedBadge = (sl.sharedToTeams && sl.sharedToTeams.length > 0) ? ` <span style="background: rgba(144, 202, 249, 0.3); color: #90caf9; font-size: 9px; padding: 1px 5px; border-radius: 4px; margin-left: 4px;">📤 ${sl.sharedToTeams.length}</span>` : '';
-let actions = sl.isArchived ? `<button class="btn-icon" onclick="event.stopPropagation(); restoreSetlist(${sl.id})">🔄</button><button class="btn-icon" onclick="event.stopPropagation(); showSetlistDeleteChoice(${sl.id}, '${sl.name.replace(/'/g, "\\'")}', false)">️</button>` : `<button class="btn-icon" onclick="event.stopPropagation(); openEditSetlistModal(${sl.id})">✏️</button><button class="btn-icon" onclick="event.stopPropagation(); showSetlistDeleteChoice(${sl.id}, '${sl.name.replace(/'/g, "\\'")}', false)">️</button>`;
-div.innerHTML = `<div class="item-left ${expiredClass}" style="min-width: 0; flex: 1;"><div style="font-size: 10px; font-weight: bold; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${sl.name}${sharedBadge}</div><div style="font-size: 10px; color: ${isExpired ? '#ef5350' : dateColor}; margin-top: 2px;">${formatSetlistDate(sl.date, sl.time)} · ${sl.songs.length} песен</div></div><div class="item-actions" style="display: flex; gap: 4px;">${actions}</div>`;
+let actions = sl.isArchived ? `<button class="btn-icon" onclick="event.stopPropagation(); restoreSetlist(${sl.id})">🔄</button><button class="btn-icon" onclick="event.stopPropagation(); showSetlistDeleteChoice(${sl.id}, '${sl.name.replace(/'/g, "\\'")}', false)">️</button>` : `<button class="btn-icon" onclick="event.stopPropagation(); openEditSetlistModal(${sl.id})">✏️</button><button class="btn-icon" onclick="event.stopPropagation(); showSetlistDeleteChoice(${sl.id}, '${sl.name.replace(/'/g, "\\'")}', false)">️🗑️</button>`;
+div.innerHTML = `<div class="item-left ${expiredClass}" style="min-width: 0; flex: 1;"><div style="font-size: 10px; font-weight: bold; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(sl.name)}${sharedBadge}</div><div style="font-size: 10px; color: ${isExpired ? '#ef5350' : dateColor}; margin-top: 2px;">${formatSetlistDate(sl.date, sl.time)} · ${sl.songs.length} песен</div></div><div class="item-actions" style="display: flex; gap: 4px;">${actions}</div>`;
 div.onclick = () => clearSetlistSearchAndOpen(sl.id); list.appendChild(div); });
 updateCarouselBadges();
 }
@@ -2415,7 +2404,7 @@ const date = document.getElementById('sl-date').value;
 const time = document.getElementById('sl-time').value;
 const name = document.getElementById('sl-name').value;
 if (!name || !date) return;
-const newId = setlists.length > 0 ? setlists.reduce((max, s) => Math.max(max, s.id), 0) + 1 : 1;
+const newId = getNextId(setlists);
 const teamId = document.getElementById('modal-setlist').dataset.teamId || null;
 setlists.push({id: newId, date, time: time || '', name, isArchived: false, teamId: teamId, songs: []});
 saveToStorage();
@@ -2515,7 +2504,7 @@ const bpmText = s.bpm ? `<div style="color:#888; font-size:10px; white-space: no
 const rightInfo = (bpmText || authorText) ? `<div style="display: flex; flex-direction: column; align-items: flex-end; margin-right: 8px; flex-shrink: 0;">${bpmText}${authorText}</div>` : '';
 let keySelectHtml = `<select class="key-select-inline" onchange="changeSongKeyInSetlist(${item.id}, this.value)">`; NOTES_SHARP.forEach(key => { keySelectHtml += `<option value="${key}" ${(key === currentSlKey) ? 'selected' : ''}>${key}</option>`; }); keySelectHtml += '</select>';
 const orderValue = idx + 1;
-div.innerHTML = `<div class="item-left"><input type="number" class="order-input" value="${orderValue}" min="1" max="${sl.songs.length}" data-original="${orderValue}" onclick="event.stopPropagation()" onfocus="handleOrderInputFocus(this, ${orderValue})" onblur="handleOrderInputBlur(this, ${item.id})"><div style="min-width: 0; flex: 1;"><div class="item-title">${s.title}<span style="color:#90caf9; font-size:12px;">${originalKeyLabel}</span>${localBadge}</div></div>${rightInfo}</div><div class="item-right">${keySelectHtml}<button class="btn-icon" onclick="event.stopPropagation(); confirmRemoveFromSl(${item.id}, '${s.title.replace(/'/g, "\\'")}')" style="color: #ef5350;">🗑️</button></div>`;
+div.innerHTML = `<div class="item-left"><input type="number" class="order-input" value="${orderValue}" min="1" max="${sl.songs.length}" data-original="${orderValue}" onclick="event.stopPropagation()" onfocus="handleOrderInputFocus(this, ${orderValue})" onblur="handleOrderInputBlur(this, ${item.id})"><div style="min-width: 0; flex: 1;"><div class="item-title">${escapeHtml(s.title)}<span style="color:#90caf9; font-size:12px;">${originalKeyLabel}</span>${localBadge}</div></div>${rightInfo}</div><div class="item-right">${keySelectHtml}<button class="btn-icon" onclick="event.stopPropagation(); confirmRemoveFromSl(${item.id}, '${s.title.replace(/'/g, "\\'")}')" style="color: #ef5350;">🗑️</button></div>`;
 div.addEventListener('dragstart', (e) => { if (e.target.closest('button, select, input')) { e.preventDefault(); return; } div.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', idx); });
 div.addEventListener('dragover', (e) => { e.preventDefault(); const t = e.target.closest('.list-item'); if (t && t !== div) t.classList.add('drag-over'); });
 div.addEventListener('dragleave', () => { div.classList.remove('drag-over'); });
@@ -2544,7 +2533,7 @@ function renderAddSongList() {
 const q = document.getElementById('add-song-search').value.toLowerCase(); const sl = setlists.find(x => x.id === currentSlId); const list = document.getElementById('add-song-list'); list.innerHTML = '';
 const filtered = songs.filter(s => !sl.songs.find(x => x.id === s.id) && (s.title.toLowerCase().includes(q) || (s.chordpro && s.chordpro.toLowerCase().includes(q)) || (s.author && s.author.toLowerCase().includes(q))));
 if (filtered.length === 0) { list.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">Нет доступных песен</p>'; return; }
-filtered.forEach(s => { const div = document.createElement('div'); div.className = 'add-song-item'; div.innerHTML = `<span>${s.title}${s.key ? ` [${s.key}]` : ''}</span><span style="color: #90caf9; font-size: 20px;">+</span>`;
+filtered.forEach(s => { const div = document.createElement('div'); div.className = 'add-song-item'; div.innerHTML = `<span>${escapeHtml(s.title)}${s.key ? ` [${s.key}]` : ''}</span><span style="color: #90caf9; font-size: 20px;">+</span>`;
 div.onclick = () => {
 sl.songs.push({id: s.id, capo: 0, key: null, chordpro: null, columns: currentColumns, fontSize});
 saveToStorage();
@@ -2764,7 +2753,8 @@ btn.style.boxShadow = 'none';
 }
 });
 }
-function finalizeExpressAdd(title, chordpro, key, bpm, author = '', category = '') { function getNextId(arr) { return arr.length === 0 ? 1 : arr.reduce((max, item) => Math.max(max, item.id), 0) + 1; } songs.push({ id: getNextId(songs), title, chordpro, key, author: author || '', bpm, category, cloudId: generateCloudId(), createdAt: Date.now(), columns: currentColumns, fontSize }); saveToStorage(); closeModal('modal-express-add'); renderSongs(); alert(`✅ Песня "${title}" добавлена!\nАвтор: ${author || '—'}\nТональность: ${key}\nBPM: ${bpm || '—'}\nКатегория: ${category ? CATEGORY_LABELS[category] : '—'}`); }
+function finalizeExpressAdd(title, chordpro, key, bpm, author = '', category = '') {
+  songs.push({ id: getNextId(songs), title, chordpro, key, author: author || '', bpm, category, cloudId: generateCloudId(), createdAt: Date.now(), columns: currentColumns, fontSize }); saveToStorage(); closeModal('modal-express-add'); renderSongs(); alert(`✅ Песня "${title}" добавлена!\nАвтор: ${author || '—'}\nТональность: ${key}\nBPM: ${bpm || '—'}\nКатегория: ${category ? CATEGORY_LABELS[category] : '—'}`); }
 function syncColumnsSelects(value) { const sel2 = document.getElementById('columns-select-mobile'); if (sel2) sel2.value = value; const selD = document.getElementById('columns-select-desktop'); if (selD) selD.value = value; }
 function updateToggleButtonsUI() {
 const chordsIcon = currentHideChords ? '🚫' : '👁️';
@@ -2985,8 +2975,9 @@ if (isFirstNonEmpty) foundFirstNonEmpty = true;
 if (shouldSkipLineForRender(line, isFirstNonEmpty)) return;
 if (trimmed.toLowerCase() === 'картинка:' || trimmed.toLowerCase() === 'image:') { flushSection(); const imageKey = `img_${songId}_${lineNum}`; const savedImage = localStorage.getItem(imageKey); const commentKey = imageKey + '_comment'; const savedComment = localStorage.getItem(commentKey) || ''; if (savedImage) html += `<div class="song-image-container"><div class="song-image-comment" contenteditable="true" onfocus="if(this.innerText==='${IMAGE_COMMENT_PLACEHOLDER}')this.innerText=''" onblur="saveImageComment('${commentKey}', this.innerText, this)" oninput="saveImageComment('${commentKey}', this.innerText, this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onclick="event.stopPropagation();">${savedComment || IMAGE_COMMENT_PLACEHOLDER}</div><img src="${savedImage}" alt="Изображение" onclick="showImageDeleteModal('${imageKey}')"></div>`; else html += `<div class="song-image-container"><div class="song-image-comment" contenteditable="true" onfocus="if(this.innerText==='${IMAGE_COMMENT_PLACEHOLDER}')this.innerText=''" onblur="saveImageComment('${commentKey}', this.innerText, this)" oninput="saveImageComment('${commentKey}', this.innerText, this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onclick="event.stopPropagation();">${IMAGE_COMMENT_PLACEHOLDER}</div><label class="song-image-upload">📷 Загрузить<input type="file" accept="image/*" onchange="uploadSongImage(this, '${imageKey}')"></label></div>`; sectionIdx++; return; }
 const sectionMatch = trimmed.match(SECTION_RE);
-if (sectionMatch) { flushSection(); sectionStartLine = lineNum; const colonIndex = trimmed.indexOf(':'); let mainPart, extraPart = ''; if (colonIndex !== -1) { mainPart = trimmed.substring(0, colonIndex + 1).toUpperCase(); extraPart = trimmed.substring(colonIndex + 1).trim(); } else mainPart = trimmed.toUpperCase(); sectionContent += `<div class="section-label" style="font-size: ${fontSize}px;">${mainPart}`; if (extraPart) sectionContent += ` <span class="section-extra">${extraPart}</span>`; sectionContent += `</div>`; lineIdx = 0; }
-else if (trimmed !== '') { if (sectionStartLine === -1) sectionStartLine = lineNum; const parsed = parseMixedLine(line); if (parsed.chords || parsed.text || parsed.rightNote) { const commentKey = `${sectionIdx}_${lineIdx}`; const savedComment = (inlineComments[songId] && inlineComments[songId][commentKey]) || ''; sectionContent += '<div class="section-block"><div class="main-content" style="white-space: pre-wrap;">'; if (parsed.chords && parsed.text) { let dc = fromKey !== toKey ? transposeLine(parsed.chords, fromKey, toKey) : parsed.chords; if (capo > 0) dc = transposeLine(dc, toKey, NOTES_SHARP[((NOTES_SHARP.indexOf(toKey) - capo) % 12 + 12) % 12]); dc = processChordLabels(dc); dc = convertLineAccidentals(dc, currentAccidental); dc = compactChords(dc); sectionContent += `<span class="chords-above" style="font-size: ${fontSize}px;"><b>${dc}</b></span> <span class="lyrics-below" style="font-size: ${fontSize}px; display: inline;">${processAccentWords(parsed.text)}</span>`; } else if (parsed.chords) { let dc = fromKey !== toKey ? transposeLine(parsed.chords, fromKey, toKey) : parsed.chords; if (capo > 0) dc = transposeLine(dc, toKey, NOTES_SHARP[((NOTES_SHARP.indexOf(toKey) - capo) % 12 + 12) % 12]); dc = processChordLabels(dc); dc = convertLineAccidentals(dc, currentAccidental); dc = compactChords(dc); sectionContent += `<span class="chords-above" style="font-size: ${fontSize}px;"><b>${dc}</b></span>`; } else if (parsed.text) sectionContent += `<span class="lyrics-below" style="font-size: ${fontSize}px; display: inline;">${processAccentWords(parsed.text)}</span>`; sectionContent += '</div>'; if (parsed.rightNote) sectionContent += `<div class="right-note" style="font-size: ${fontSize}px;">${parsed.rightNote}</div>`; if (parsed.inlineComment) sectionContent += `<input type="text" class="inline-comment-input" maxlength="12" value="${savedComment.replace(/"/g, '&quot;')}" oninput="saveInlineComment(${songId}, ${sectionIdx}, ${lineIdx}, this.value)" placeholder="..." />`; sectionContent += '</div>'; lineIdx++; } }
+if (sectionMatch) { flushSection(); sectionStartLine = lineNum; const colonIndex = trimmed.indexOf(':'); let mainPart, extraPart = ''; if (colonIndex !== -1) { mainPart = trimmed.substring(0, colonIndex + 1).toUpperCase(); extraPart = trimmed.substring(colonIndex + 1).trim(); } else mainPart = trimmed.toUpperCase(); sectionContent += `<div class="section-label" style="font-size: ${fontSize}px;">${mainPart}`; 
+if (extraPart) sectionContent += ` <span class="section-extra">${escapeHtml(extraPart)}</span>`; sectionContent += `</div>`; lineIdx = 0; }
+else if (trimmed !== '') { if (sectionStartLine === -1) sectionStartLine = lineNum; const parsed = parseMixedLine(line); if (parsed.chords || parsed.text || parsed.rightNote) { const commentKey = `${sectionIdx}_${lineIdx}`; const savedComment = (inlineComments[songId] && inlineComments[songId][commentKey]) || ''; sectionContent += '<div class="section-block"><div class="main-content" style="white-space: pre-wrap;">'; if (parsed.chords && parsed.text) { let dc = fromKey !== toKey ? transposeLine(escapeHtml(parsed.chords), fromKey, toKey) : escapeHtml(parsed.chords); if (capo > 0) dc = transposeLine(dc, toKey, NOTES_SHARP[((NOTES_SHARP.indexOf(toKey) - capo) % 12 + 12) % 12]); dc = processChordLabels(dc); dc = convertLineAccidentals(dc, currentAccidental); dc = compactChords(dc); sectionContent += `<span class="chords-above" style="font-size: ${fontSize}px;"><b>${dc}</b></span> <span class="lyrics-below" style="font-size: ${fontSize}px; display: inline;">${processAccentWords(escapeHtml(parsed.text))}</span>`; } else if (parsed.chords) { let dc = fromKey !== toKey ? transposeLine(escapeHtml(parsed.chords), fromKey, toKey) : escapeHtml(parsed.chords); if (capo > 0) dc = transposeLine(dc, toKey, NOTES_SHARP[((NOTES_SHARP.indexOf(toKey) - capo) % 12 + 12) % 12]); dc = processChordLabels(dc); dc = convertLineAccidentals(dc, currentAccidental); dc = compactChords(dc); sectionContent += `<span class="chords-above" style="font-size: ${fontSize}px;"><b>${dc}</b></span>`; } else if (parsed.text) sectionContent += `<span class="lyrics-below" style="font-size: ${fontSize}px; display: inline;">${processAccentWords(escapeHtml(parsed.text))}</span>`; sectionContent += '</div>'; if (parsed.rightNote) sectionContent += `<div class="right-note" style="font-size: ${fontSize}px;">${escapeHtml(parsed.rightNote)}</div>`; if (parsed.inlineComment) sectionContent += `<input type="text" class="inline-comment-input" maxlength="12" value="${savedComment.replace(/"/g, '&quot;')}" oninput="saveInlineComment(${songId}, ${sectionIdx}, ${lineIdx}, this.value)" placeholder="..." />`; sectionContent += '</div>'; lineIdx++; } }
 });
 flushSection(); html += '</div>'; document.getElementById('song-view-content').innerHTML = html;
 const isDesktop = window.matchMedia('(hover: hover) and (pointer: fine) and (min-width: 769px)').matches; const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints;
@@ -3077,10 +3068,11 @@ return { title: s.title, author: s.author || '', key: key, originalKey: s.key, c
 function exportAllActiveSetlists() { const active = setlists.filter(sl => !sl.isArchived && !sl.teamId); if (!active.length) { alert('Нет актуальных сет-листов'); return; } shareFile({ version: 2, type: 'setlists-bulk', app: 'Worship SetUP', data: { setlists: active.map(sl => ({ date: sl.date, time: sl.time || '', name: sl.name, songs: sl.songs.map(item => { const s = songs.find(x => x.id === item.id); return s ? exportSongFromSetlist(item, s) : null; }).filter(Boolean) })) } }, `AllSetlists_${getCurrentDate()}.clcsetlist`); }
 function handleImportSetlist(event) { const files = event.target.files; if (!files?.length) return; let processed = 0, totalSongs = 0, totalSl = 0; const total = files.length; Array.from(files).forEach(file => { const reader = new FileReader(); reader.onload = (e) => { try { const data = JSON.parse(e.target.result); if (data.type === 'setlists-bulk' && data.data?.setlists) data.data.setlists.forEach(slData => { const r = importSingleSetlist(slData); totalSongs += r.songsAdded; totalSl++; }); else if (data.type === 'setlist' && data.data) { const r = importSingleSetlist(data.data); totalSongs += r.songsAdded; totalSl++; } else alert(`❌ "${file.name}" — не файл сет-листа`); } catch (err) { alert(`❌ Ошибка "${file.name}": ` + err.message); } if (++processed === total) { saveToStorage(); renderSetlists(); alert(`✅ Импортировано!\nСет-листов: ${totalSl}\nПесен: ${totalSongs}`); } }; reader.readAsText(file); }); event.target.value = ''; }
 function importSingleSetlist(slData) {
-const newSlId = setlists.length > 0 ? setlists.reduce((max, s) => Math.max(max, s.id), 0) + 1 : 1;
+const newSlId = getNextId(setlists);
 const newSongs = [];
 let songsAdded = 0;
 slData.songs.forEach(sd => {
+sd = sanitizeImportedSong(sd); if (!sd) return;
 const existing = songs.find(s => s.title.toLowerCase() === sd.title.toLowerCase());
 const songOriginalKey = sd.originalKey || sd.key;
 if (existing) {
@@ -3088,7 +3080,7 @@ newSongs.push({ id: existing.id, capo: sd.capo || 0, key: sd.key, chordpro: null
 if (sd.sectionNotes && Object.keys(sd.sectionNotes).length > 0) { if (!sectionNotes[existing.id]) sectionNotes[existing.id] = {}; Object.assign(sectionNotes[existing.id], sd.sectionNotes); }
 if (sd.inlineComments && Object.keys(sd.inlineComments).length > 0) { if (!inlineComments[existing.id]) inlineComments[existing.id] = {}; Object.assign(inlineComments[existing.id], sd.inlineComments); }
 } else {
-const nid = songs.length > 0 ? songs.reduce((max, s) => Math.max(max, s.id), 0) + 1 : 1;
+const nid = getNextId(songs);
 songs.push({ id: nid, title: sd.title, author: sd.author || '', key: songOriginalKey, bpm: sd.bpm || '', category: sd.category || '', chordpro: sd.chordpro, cloudId: generateCloudId(), createdAt: Date.now(), columns: currentColumns, fontSize });
 newSongs.push({ id: nid, capo: sd.capo || 0, key: sd.key, chordpro: null, columns: currentColumns, fontSize });
 if (sd.sectionNotes && Object.keys(sd.sectionNotes).length > 0) sectionNotes[nid] = { ...sd.sectionNotes };
@@ -3113,7 +3105,9 @@ reader.onload = (e) => {
 try {
 const data = JSON.parse(e.target.result);
 if (data.type !== 'song' || !data.data) { alert('❌ Это не файл песни'); return; }
-const songData = data.data;
+let songData = data.data;
+songData = sanitizeImportedSong(songData);
+if (!songData) { alert('❌ Некорректный файл песни'); return; }
 const existing = songs.find(s => s.title.toLowerCase() === songData.title.toLowerCase());
 if (existing) {
 if (!confirm(`Песня "${songData.title}" уже существует. Заменить её?`)) return;
@@ -3125,7 +3119,7 @@ existing.chordpro = songData.chordpro;
 if (songData.sectionNotes) sectionNotes[existing.id] = { ...songData.sectionNotes };
 if (songData.inlineComments) inlineComments[existing.id] = { ...songData.inlineComments };
 } else {
-const newId = songs.length > 0 ? songs.reduce((max, s) => Math.max(max, s.id), 0) + 1 : 1;
+const newId = getNextId(songs);
 songs.push({ id: newId, title: songData.title, author: songData.author || '', key: songData.key, bpm: songData.bpm || '', category: songData.category || '', chordpro: songData.chordpro, createdAt: Date.now(), columns: currentColumns, fontSize });
 if (songData.sectionNotes) sectionNotes[newId] = { ...songData.sectionNotes };
 if (songData.inlineComments) inlineComments[newId] = { ...songData.inlineComments };
@@ -3139,7 +3133,8 @@ reader.readAsText(file);
 event.target.value = '';
 }
 function exportDatabase() { const dn = `База_${getCurrentDate()}`; const fn = prompt('Имя файла:', dn); if (fn === null) return; const cn = fn.trim() || dn; const final = cn.toLowerCase().endsWith('.clcdb') ? cn : cn + '.clcdb'; shareFile({ version: 1, type: 'database', app: 'Worship SetUP', exportDate: new Date().toISOString(), data: { songs, sectionNotes, inlineComments } }, final); }
-function handleImportDatabase(event) { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (e) => { try { const data = JSON.parse(e.target.result); if (data.type !== 'database' || !data.data) { alert('❌ Не файл базы данных'); return; } const db = data.data; let added = 0, skipped = 0; if (db.songs) db.songs.forEach(is => { if (!songs.find(s => s.title.toLowerCase() === is.title.toLowerCase())) { const nid = songs.length > 0 ? songs.reduce((max, s) => Math.max(max, s.id), 0) + 1 : 1; songs.push({ id: nid, title: is.title, author: is.author || '', key: is.key || 'C', bpm: is.bpm || '', category: is.category || '', chordpro: is.chordpro || '', columns: is.columns || currentColumns, fontSize: is.fontSize || fontSize, createdAt: is.createdAt || Date.now() }); added++; } else skipped++; }); if (db.sectionNotes) Object.keys(db.sectionNotes).forEach(sid => { if (!sectionNotes[sid]) sectionNotes[sid] = {}; Object.assign(sectionNotes[sid], db.sectionNotes[sid]); }); if (db.inlineComments) Object.keys(db.inlineComments).forEach(sid => { if (!inlineComments[sid]) inlineComments[sid] = {}; Object.assign(inlineComments[sid], db.inlineComments[sid]); }); saveToStorage(); if (currentHomeView === 'songs') renderSongs(); else renderSetlists(); alert(`✅ Импорт!\nДобавлено: ${added}\nПропущено: ${skipped}`); } catch (err) { alert(' Ошибка: ' + err.message); } }; reader.readAsText(file); event.target.value = ''; }
+function handleImportDatabase(event) { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (e) => { try { const data = JSON.parse(e.target.result); if (data.type !== 'database' || !data.data) { alert('❌ Не файл базы данных'); return; } const db = data.data; let added = 0, skipped = 0; if (db.songs) db.songs.forEach(is => { is = sanitizeImportedSong(is); if (!is) { skipped++; return; } if (!songs.find(s => s.title.toLowerCase() === is.title.toLowerCase())) { const nid = getNextId(songs);
+songs.push({ id: nid, title: is.title, author: is.author || '', key: is.key || 'C', bpm: is.bpm || '', category: is.category || '', chordpro: is.chordpro || '', columns: is.columns || currentColumns, fontSize: is.fontSize || fontSize, createdAt: is.createdAt || Date.now() }); added++; } else skipped++; }); if (db.sectionNotes) Object.keys(db.sectionNotes).forEach(sid => { if (!sectionNotes[sid]) sectionNotes[sid] = {}; Object.assign(sectionNotes[sid], db.sectionNotes[sid]); }); if (db.inlineComments) Object.keys(db.inlineComments).forEach(sid => { if (!inlineComments[sid]) inlineComments[sid] = {}; Object.assign(inlineComments[sid], db.inlineComments[sid]); }); saveToStorage(); if (currentHomeView === 'songs') renderSongs(); else renderSetlists(); alert(`✅ Импорт!\nДобавлено: ${added}\nПропущено: ${skipped}`); } catch (err) { alert(' Ошибка: ' + err.message); } }; reader.readAsText(file); event.target.value = ''; }
 
 // Override saveToStorage to sync with cloud
 const originalSaveToStorage = saveToStorage;
