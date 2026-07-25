@@ -1218,8 +1218,11 @@ async function loadUserDataFromCloud() {
                 updateAvatarsInUI(data.avatar);
             }
  
-            teams.forEach(t => startTeamDataListener(t.id));
-            applyAllTeamOverlays();
+            teams.forEach(t => {
+    startTeamDataListener(t.id);
+    startTeamRegistryListener(t.id);
+});
+applyAllTeamOverlays();
  
             // ✅ ПЕРЕРИСОВЫВАЕМ ТОЛЬКО ОДИН РАЗ, если что-то изменилось
             if (updated) {
@@ -1282,7 +1285,10 @@ function startCloudSync() {
                 if (data.teams && JSON.stringify(data.teams) !== JSON.stringify(teams)) {
                     teams = data.teams; needsRender = true;
                 }
-                teams.forEach(t => startTeamDataListener(t.id));
+                teams.forEach(t => {
+    startTeamDataListener(t.id);
+    startTeamRegistryListener(t.id);
+});
                 if (data.sectionNotes) { sectionNotes = data.sectionNotes; needsRender = true; }
                 if (data.inlineComments) { inlineComments = data.inlineComments; needsRender = true; }
                 if (data.avatar && !localStorage.getItem('clc_avatar_' + currentUser.uid)) {
@@ -1761,17 +1767,27 @@ if (avatarData !== undefined) team.avatar = avatarData;
 if (db && currentUser) db.collection('teamRegistry').doc(team.id).set({ name: newName, password: newPassword, createdBy: currentUser.uid, createdAt: team.createdAt || Date.now() }).catch(err => console.error('teamRegistry sync failed:', err));
 }
 } else {
-const id = 'team_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-const newTeam = {
-id,
-name: newName,
-password: newPassword,
-avatar: avatarData || null,
-members: [],
-createdAt: Date.now()
-};
-teams.push(newTeam);
-if (db && currentUser) db.collection('teamRegistry').doc(id).set({ name: newName, password: newPassword, createdBy: currentUser.uid, createdAt: newTeam.createdAt }).catch(err => console.error('teamRegistry sync failed:', err));
+    const id = 'team_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+    const creatorUid = currentUser ? currentUser.uid : null;
+    const newTeam = {
+        id,
+        name: newName,
+        password: newPassword,
+        avatar: avatarData || null,
+        members: creatorUid ? [creatorUid] : [],
+        createdAt: Date.now()
+    };
+    teams.push(newTeam);
+    if (db && currentUser) {
+        db.collection('teamRegistry').doc(id).set({
+            name: newName,
+            password: newPassword,
+            createdBy: currentUser.uid,
+            members: [currentUser.uid],
+            createdAt: newTeam.createdAt
+        }).catch(err => console.error('teamRegistry sync failed:', err));
+        startTeamRegistryListener(id);
+    }
 }
 saveToStorage();
 closeModal('modal-team-edit');
@@ -1826,7 +1842,13 @@ setlists = setlists.filter(sl => sl.teamId !== teamId);
 songs = songs.filter(s => s.fromTeam !== teamId);
 teams = teams.filter(t => t.id !== teamId);
 if (teamListenerUnsubs[teamId]) { teamListenerUnsubs[teamId](); delete teamListenerUnsubs[teamId]; }
+if (teamListenerUnsubs['reg_' + teamId]) { teamListenerUnsubs['reg_' + teamId](); delete teamListenerUnsubs['reg_' + teamId]; }
 delete teamDataCache[teamId];
+if (db && currentUser) {
+    db.collection('teamRegistry').doc(teamId).set({
+        members: firebase.firestore.FieldValue.arrayRemove(currentUser.uid)
+    }, { merge: true }).catch(err => console.error('members leave sync failed:', err));
+}
 saveToStorage();
 renderCarousel();
 currentHomeView = 'teams';
@@ -1929,16 +1951,22 @@ alert('❌ Неверный пароль команды');
 return;
 }
 const newTeam = {
-id: teamId,
-name: registry.name,
-password: registry.password || '',
-avatar: null,
-members: [],
-createdAt: Date.now(),
-joinedByLink: true
+    id: teamId,
+    name: registry.name,
+    password: registry.password || '',
+    avatar: null,
+    members: currentUser ? [currentUser.uid] : [],
+    createdAt: Date.now(),
+    joinedByLink: true
 };
 teams.push(newTeam);
 startTeamDataListener(teamId);
+if (db && currentUser) {
+    db.collection('teamRegistry').doc(teamId).set({
+        members: firebase.firestore.FieldValue.arrayUnion(currentUser.uid)
+    }, { merge: true }).catch(err => console.error('members join sync failed:', err));
+    startTeamRegistryListener(teamId);
+}
 saveToStorage();
 closeModal('modal-join-team-link');
 renderCarousel();
@@ -1980,6 +2008,28 @@ songs = songs.filter(s => s.fromTeam !== teamId);
 setlists = setlists.filter(sl => !(sl.teamId === teamId && sl.fromTeamSync));
 (data.songs || []).forEach(s => songs.push({ ...s, fromTeam: teamId }));
 (data.setlists || []).forEach(sl => setlists.push({ ...sl, teamId: teamId, fromTeamSync: true }));
+}
+function startTeamRegistryListener(teamId) {
+    if (!db || !currentUser) return;
+    const key = 'reg_' + teamId;
+    if (teamListenerUnsubs[key]) return; // уже подписаны
+    teamListenerUnsubs[key] = db.collection('teamRegistry').doc(teamId)
+        .onSnapshot(doc => {
+            if (!doc.exists) return;
+            const data = doc.data();
+            const team = teams.find(t => t.id === teamId);
+            if (!team) return;
+            const newMembers = Array.isArray(data.members) ? data.members : [];
+            // сравниваем, чтобы не дёргать перерисовку зря
+            const oldKey = (team.members || []).slice().sort().join('|');
+            const newKey = newMembers.slice().sort().join('|');
+            if (oldKey !== newKey) {
+                team.members = newMembers;
+                saveToStorage();
+                if (currentHomeView === 'teams') showTeamsView();
+                renderCarousel();
+            }
+        }, err => console.error('teamRegistry listener error:', err));
 }
 function applyAllTeamOverlays() {
 Object.keys(teamDataCache).forEach(applyTeamOverlay);
