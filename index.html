@@ -904,7 +904,12 @@ style="width: 100%; background: #1e1e1e; border: 1px solid #444; color: #eee; fo
 <button class="btn-main" onclick="copyTeamInviteLink()" style="margin-bottom: 15px;">📋 Скопировать ссылку</button>
 <p style="font-size: 13px; color: #888; margin-bottom: 10px;">ID команды:</p>
 <div id="team-invite-id" style="background: rgba(179, 157, 219, 0.1); padding: 12px; border-radius: 8px; border: 1px solid rgba(179, 157, 219, 0.4); word-break: break-all; font-size: 12px; color: #b39ddb; margin-bottom: 10px; user-select: all; font-family: monospace;"></div>
-<button class="btn-pastel" style="width: 100%;" onclick="copyTeamInviteId()"> Скопировать ID</button>
+<button class="btn-pastel" style="width: 100%;" onclick="copyTeamInviteId()">📋 Скопировать ID</button>
+<div id="team-invite-pwd-block" style="display: none;">
+<p style="font-size: 13px; color: #888; margin-bottom: 10px; margin-top: 15px;">🔐 Пароль команды:</p>
+<div id="team-invite-pwd" style="background: rgba(239, 83, 80, 0.1); padding: 12px; border-radius: 8px; border: 1px solid rgba(239, 83, 80, 0.4); word-break: break-all; font-size: 12px; color: #ef9a9a; margin-bottom: 10px; user-select: all; font-family: monospace;"></div>
+<button class="btn-pastel" style="width: 100%;" onclick="copyTeamInvitePassword()">📋 Скопировать пароль</button>
+</div>
 <button class="btn-secondary" style="width: 100%; margin-top: 10px;" onclick="closeModal('modal-team-invite')">Закрыть</button>
 </div></div>
 <div id="modal-join-team-link" class="modal"><div class="modal-content"><h2>🔗 Присоединиться к команде</h2><label style="font-weight: bold; display: block; margin-bottom: 5px;">Ссылка-приглашение</label><input type="text" id="join-team-link-input" placeholder="Вставьте ссылку или ID команды" oninput="onJoinLinkInput()"><div id="join-team-password-row" style="display: none;"><label style="font-weight: bold; display: block; margin-bottom: 5px;">🔐 Пароль команды</label><input type="password" id="join-team-password-input" placeholder="Введите пароль"></div><div class="modal-actions"><button class="btn-secondary" onclick="closeModal('modal-join-team-link')">Отмена</button><button class="btn-main" style="width: auto; margin:0;" onclick="submitJoinTeam()">Присоединиться</button></div></div></div>
@@ -1209,12 +1214,15 @@ async function loadUserDataFromCloud() {
                 updated = true;
             }
             if (data.avatar) {
-                localStorage.setItem('clc_avatar_' + currentUser.uid, data.avatar);
-                updateAvatarsInUI(data.avatar);
-            }
-
-            // ✅ ПЕРЕРИСОВЫВАЕМ ТОЛЬКО ОДИН РАЗ, если что-то изменилось
-            if (updated) {
+                localStorage.setItem('clc_avatar_' + currentUser.uid, data.avatar);
+                updateAvatarsInUI(data.avatar);
+            }
+ 
+            teams.forEach(t => startTeamDataListener(t.id));
+            applyAllTeamOverlays();
+ 
+            // ✅ ПЕРЕРИСОВЫВАЕМ ТОЛЬКО ОДИН РАЗ, если что-то изменилось
+            if (updated) {
                 renderSongs();
                 renderSetlists();
                 console.log('✅ Данные загружены из облака');
@@ -1240,9 +1248,9 @@ async function saveUserDataToCloud() {
         const localAvatar = localStorage.getItem('clc_avatar_' + currentUser.uid);
         
         await db.collection('users').doc(currentUser.uid).set({
-            songs: songs,
-            setlists: setlists,
-            teams: teams,
+            songs: songs.filter(s => !s.fromTeam),
+            setlists: setlists.filter(sl => !sl.fromTeamSync),
+            teams: teams,
             sectionNotes: sectionNotes,
             inlineComments: inlineComments,
             avatar: localAvatar || null,  // === НОВОЕ: Сохраняем аватарку ===
@@ -1274,6 +1282,7 @@ function startCloudSync() {
                 if (data.teams && JSON.stringify(data.teams) !== JSON.stringify(teams)) {
                     teams = data.teams; needsRender = true;
                 }
+                teams.forEach(t => startTeamDataListener(t.id));
                 if (data.sectionNotes) { sectionNotes = data.sectionNotes; needsRender = true; }
                 if (data.inlineComments) { inlineComments = data.inlineComments; needsRender = true; }
                 if (data.avatar && !localStorage.getItem('clc_avatar_' + currentUser.uid)) {
@@ -1282,7 +1291,8 @@ function startCloudSync() {
                 }
 
                 if (needsRender) {
-                    originalSaveToStorage(); 
+                    applyAllTeamOverlays();
+                    originalSaveToStorage(); 
                     renderSongs();
                     renderSetlists();
                     console.log("✅ Данные синхронизированы из облака в реальном времени");
@@ -1332,6 +1342,7 @@ const DIATONIC_CHORDS = {
 'H':  [{r:'H',m:false},{r:'C#',m:true},{r:'D#',m:true},{r:'E',m:false},{r:'F#',m:false},{r:'G#',m:true},{r:'A#',m:true}]
 };
 let songs = [], setlists = [], teams = [];
+let teamDataCache = {}, teamListenerUnsubs = {}, currentTeamDetailId = null;
 let currentTab = 'current', currentHomeView = 'songs', currentSongId = null, currentSlId = null;
 let originalKey = 'C', currentKey = 'C', currentCapo = 0, currentColumns = 1, fontSize = 14;
 let isLocalEdit = false, pendingSetlistAction = null, sectionNotes = {}, inlineComments = {};
@@ -1747,6 +1758,7 @@ if (team) {
 team.name = newName;
 team.password = newPassword;
 if (avatarData !== undefined) team.avatar = avatarData;
+if (db && currentUser) db.collection('teamRegistry').doc(team.id).set({ name: newName, password: newPassword, createdBy: currentUser.uid, createdAt: team.createdAt || Date.now() }).catch(err => console.error('teamRegistry sync failed:', err));
 }
 } else {
 const id = 'team_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
@@ -1759,6 +1771,7 @@ members: [],
 createdAt: Date.now()
 };
 teams.push(newTeam);
+if (db && currentUser) db.collection('teamRegistry').doc(id).set({ name: newName, password: newPassword, createdBy: currentUser.uid, createdAt: newTeam.createdAt }).catch(err => console.error('teamRegistry sync failed:', err));
 }
 saveToStorage();
 closeModal('modal-team-edit');
@@ -1779,6 +1792,12 @@ const baseUrl = window.location.origin + window.location.pathname;
 const inviteUrl = `${baseUrl}?invite=${team.id}${team.password ? '&pwd=1' : ''}`;
 document.getElementById('team-invite-link').innerText = inviteUrl;
 document.getElementById('team-invite-id').innerText = team.id;
+if (team.password) {
+document.getElementById('team-invite-pwd').innerText = team.password;
+document.getElementById('team-invite-pwd-block').style.display = 'block';
+} else {
+document.getElementById('team-invite-pwd-block').style.display = 'none';
+}
 document.getElementById('modal-team-invite').dataset.teamId = teamId;
 document.getElementById('modal-team-invite').classList.add('show');
 }
@@ -1804,7 +1823,10 @@ warning += `\n⚠️ В команде ${activeSetlists.length} актуальн
 }
 showDeleteConfirm('team', teamId, warning, async () => {
 setlists = setlists.filter(sl => sl.teamId !== teamId);
+songs = songs.filter(s => s.fromTeam !== teamId);
 teams = teams.filter(t => t.id !== teamId);
+if (teamListenerUnsubs[teamId]) { teamListenerUnsubs[teamId](); delete teamListenerUnsubs[teamId]; }
+delete teamDataCache[teamId];
 saveToStorage();
 renderCarousel();
 currentHomeView = 'teams';
@@ -1826,6 +1848,18 @@ ta.select();
 document.execCommand('copy');
 document.body.removeChild(ta);
 alert('✅ ID команды скопирован!');
+});
+}
+function copyTeamInvitePassword() {
+const pwd = document.getElementById('team-invite-pwd').innerText;
+navigator.clipboard.writeText(pwd).then(() => alert('✅ Пароль скопирован!')).catch(() => {
+const ta = document.createElement('textarea');
+ta.value = pwd;
+document.body.appendChild(ta);
+ta.select();
+document.execCommand('copy');
+document.body.removeChild(ta);
+alert('✅ Пароль скопирован!');
 });
 }
 function showJoinTeamByLinkModal() {
@@ -1873,28 +1907,43 @@ return;
 const pwd = document.getElementById('join-team-password-input').value;
 confirmJoinTeam(parsed.teamId, pwd);
 }
-function confirmJoinTeam(teamId, password) {
+async function confirmJoinTeam(teamId, password) {
 if (teams.length >= MAX_TEAMS) {
 alert(`❌ Достигнут лимит команд (${MAX_TEAMS})`);
 return;
 }
-const name = prompt('Название команды (уточните у отправителя):');
-if (!name || !name.trim()) return;
+let registryDoc;
+try {
+registryDoc = await db.collection('teamRegistry').doc(teamId).get();
+} catch (err) {
+alert('❌ Не удалось проверить команду. Проверьте подключение к интернету.');
+return;
+}
+if (!registryDoc.exists) {
+alert('❌ Команда не найдена. Проверьте ссылку-приглашение.');
+return;
+}
+const registry = registryDoc.data();
+if (registry.password && registry.password !== password) {
+alert('❌ Неверный пароль команды');
+return;
+}
 const newTeam = {
 id: teamId,
-name: name.trim(),
-password: password,
+name: registry.name,
+password: registry.password || '',
 avatar: null,
 members: [],
 createdAt: Date.now(),
 joinedByLink: true
 };
 teams.push(newTeam);
+startTeamDataListener(teamId);
 saveToStorage();
 closeModal('modal-join-team-link');
 renderCarousel();
 showTeamsView();
-alert(`✅ Вы присоединились к команде «${name}»!`);
+alert(`✅ Вы присоединились к команде «${registry.name}»!`);
 }
 function openSetlistModalForTeam(teamId) {
 document.getElementById('sl-date').value = getCurrentDate();
@@ -1924,6 +1973,28 @@ renderSetlists();
 showTeamDetailView(sl.teamId);
 alert(`✅ Сет-лист «${sl.name}» добавлен в ваши сет-листы!`);
 }
+function applyTeamOverlay(teamId) {
+const data = teamDataCache[teamId];
+if (!data) return;
+songs = songs.filter(s => s.fromTeam !== teamId);
+setlists = setlists.filter(sl => !(sl.teamId === teamId && sl.fromTeamSync));
+(data.songs || []).forEach(s => songs.push({ ...s, fromTeam: teamId }));
+(data.setlists || []).forEach(sl => setlists.push({ ...sl, teamId: teamId, fromTeamSync: true }));
+}
+function applyAllTeamOverlays() {
+Object.keys(teamDataCache).forEach(applyTeamOverlay);
+}
+function startTeamDataListener(teamId) {
+if (teamListenerUnsubs[teamId] || !db || !currentUser) return;
+teamListenerUnsubs[teamId] = db.collection('teamData').doc(teamId).onSnapshot(doc => {
+teamDataCache[teamId] = doc.exists ? doc.data() : { songs: [], setlists: [] };
+applyTeamOverlay(teamId);
+if (currentTeamDetailId === teamId) showTeamDetailView(teamId);
+if (currentHomeView === 'songs') renderSongs();
+if (currentHomeView === 'setlists') renderSetlists();
+renderCarousel();
+}, err => console.error('teamData listener error:', err));
+}
 function showTeamDetailView(teamId) {
 const view = document.getElementById('home-view-team-detail');
 const team = teams.find(t => t.id === teamId);
@@ -1932,6 +2003,8 @@ view.innerHTML = '<p style="color:#ef5350;text-align:center;padding:40px;">Ко�
 view.style.display = 'block';
 return;
 }
+currentTeamDetailId = teamId;
+startTeamDataListener(teamId);
 view.style.display = 'block';
 const teamSetlists = setlists.filter(sl => sl.teamId === teamId);
 const activeSetlists = teamSetlists.filter(sl => !sl.isArchived);
@@ -2066,51 +2139,49 @@ if (err.name === 'AbortError') return;
 }
 downloadJson(fileData, filename);
 }
-function shareSetlistToTeam(setlistId, teamId) {
+async function shareSetlistToTeam(setlistId, teamId) {
 const sl = setlists.find(x => x.id === setlistId);
 const team = teams.find(t => t.id === teamId);
 if (!sl || !team) return;
 if (!confirm(`Отправить сет-лист «${sl.name}» в команду «${team.name}»?`)) return;
-const existingSl = setlists.find(x =>
-x.teamId === teamId &&
-!x.isArchived &&
-x.name.toLowerCase() === sl.name.toLowerCase() &&
-x.date === sl.date
-);
-if (existingSl) {
-if (!confirm(`В команде «${team.name}» уже есть сет-лист «${sl.name}» от ${formatSetlistDate(sl.date, sl.time)}.\nЗаменить его содержимое?`)) {
-closeModal('modal-share-setlist');
-return;
-}
-existingSl.songs = sl.songs.map(item => ({...item}));
-existingSl.time = sl.time || '';
-existingSl.sharedAt = Date.now();
-existingSl.hasChanges = false;
-saveToStorage();
-closeModal('modal-share-setlist');
-renderSetlists();
-renderCarousel();
-alert(`✅ Сет-лист «${sl.name}» обновлён в команде «${team.name}»!`);
-} else {
-const newSlId = getNextId(setlists);
-setlists.push({
-id: newSlId,
+if (!db || !currentUser) { alert('❌ Нет подключения к облаку'); return; }
+const songsToShare = sl.songs.map(item => {
+const s = songs.find(x => x.id === item.id);
+return s ? { ...s } : null;
+}).filter(Boolean);
+const docRef = db.collection('teamData').doc(teamId);
+try {
+await db.runTransaction(async (tx) => {
+const doc = await tx.get(docRef);
+const data = doc.exists ? doc.data() : { songs: [], setlists: [] };
+const teamSongs = data.songs || [];
+const teamSetlists = data.setlists || [];
+songsToShare.forEach(s => {
+const idx = teamSongs.findIndex(ts => ts.id === s.id);
+if (idx !== -1) teamSongs[idx] = s; else teamSongs.push(s);
+});
+const existingIdx = teamSetlists.findIndex(ts => ts.name.toLowerCase() === sl.name.toLowerCase() && ts.date === sl.date);
+const sharedSetlist = {
+id: existingIdx !== -1 ? teamSetlists[existingIdx].id : getNextId(teamSetlists),
 date: sl.date,
 time: sl.time || '',
 name: sl.name,
 isArchived: false,
-teamId: teamId,
-originalId: sl.id,
+sharedBy: currentUser.uid,
 sharedAt: Date.now(),
-songs: sl.songs.map(item => ({...item}))
+songs: sl.songs.map(item => ({ ...item }))
+};
+if (existingIdx !== -1) teamSetlists[existingIdx] = sharedSetlist; else teamSetlists.push(sharedSetlist);
+tx.set(docRef, { songs: teamSongs, setlists: teamSetlists, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid });
 });
 sl.sharedToTeams = sl.sharedToTeams || [];
 if (!sl.sharedToTeams.includes(teamId)) sl.sharedToTeams.push(teamId);
 saveToStorage();
 closeModal('modal-share-setlist');
 renderSetlists();
-renderCarousel();
-alert(`✅ Сет-лист отправлен в команду «${team.name}»!\nТеперь он доступен во вкладке «${team.name}».`);
+alert(`✅ Сет-лист «${sl.name}» отправлен в команду «${team.name}»!\nОн появится у всех участников автоматически.`);
+} catch (err) {
+alert('❌ Не удалось отправить сет-лист: ' + err.message);
 }
 }
 function convertBtoH(chord) { if (chord.includes('/')) { const parts = chord.split('/'); return convertBtoH(parts[0]) + '/' + convertBtoH(parts[1]); } if (chord.startsWith('B') && !chord.startsWith('Bb')) return 'H' + chord.substring(1); return chord; }
@@ -2260,7 +2331,7 @@ if (savedSort) { const sel = document.getElementById('songs-sort'); if (sel) sel
 const savedCategoryFilter = localStorage.getItem('clc_category_filter');
 if (savedCategoryFilter) { const sel = document.getElementById('category-filter'); if (sel) sel.value = savedCategoryFilter; }
 }
-function saveToStorage() { localStorage.setItem('clc_songs', JSON.stringify(songs)); localStorage.setItem('clc_setlists', JSON.stringify(setlists)); localStorage.setItem('clc_section_notes', JSON.stringify(sectionNotes)); localStorage.setItem('clc_inline_comments', JSON.stringify(inlineComments)); localStorage.setItem('clc_teams', JSON.stringify(teams)); }
+function saveToStorage() { localStorage.setItem('clc_songs', JSON.stringify(songs.filter(s => !s.fromTeam))); localStorage.setItem('clc_setlists', JSON.stringify(setlists.filter(sl => !sl.fromTeamSync))); localStorage.setItem('clc_section_notes', JSON.stringify(sectionNotes)); localStorage.setItem('clc_inline_comments', JSON.stringify(inlineComments)); localStorage.setItem('clc_teams', JSON.stringify(teams)); }
 function updateThemeButtons(icon) {
 document.querySelectorAll('.theme-toggle').forEach(b => b.innerText = icon);
 }
@@ -3067,6 +3138,23 @@ return { title: s.title, author: s.author || '', key: key, originalKey: s.key, c
 }
 function exportAllActiveSetlists() { const active = setlists.filter(sl => !sl.isArchived && !sl.teamId); if (!active.length) { alert('Нет актуальных сет-листов'); return; } shareFile({ version: 2, type: 'setlists-bulk', app: 'Worship SetUP', data: { setlists: active.map(sl => ({ date: sl.date, time: sl.time || '', name: sl.name, songs: sl.songs.map(item => { const s = songs.find(x => x.id === item.id); return s ? exportSongFromSetlist(item, s) : null; }).filter(Boolean) })) } }, `AllSetlists_${getCurrentDate()}.clcsetlist`); }
 function handleImportSetlist(event) { const files = event.target.files; if (!files?.length) return; let processed = 0, totalSongs = 0, totalSl = 0; const total = files.length; Array.from(files).forEach(file => { const reader = new FileReader(); reader.onload = (e) => { try { const data = JSON.parse(e.target.result); if (data.type === 'setlists-bulk' && data.data?.setlists) data.data.setlists.forEach(slData => { const r = importSingleSetlist(slData); totalSongs += r.songsAdded; totalSl++; }); else if (data.type === 'setlist' && data.data) { const r = importSingleSetlist(data.data); totalSongs += r.songsAdded; totalSl++; } else alert(`❌ "${file.name}" — не файл сет-листа`); } catch (err) { alert(`❌ Ошибка "${file.name}": ` + err.message); } if (++processed === total) { saveToStorage(); renderSetlists(); alert(`✅ Импортировано!\nСет-листов: ${totalSl}\nПесен: ${totalSongs}`); } }; reader.readAsText(file); }); event.target.value = ''; }
+function sanitizeImportedSong(sd) {
+  if (!sd || typeof sd !== 'object') return null;
+  const title = typeof sd.title === 'string' ? sd.title.trim().slice(0, 200) : '';
+  if (!title) return null;
+  return {
+    title,
+    author: typeof sd.author === 'string' ? sd.author.slice(0, 200) : '',
+    key: typeof sd.key === 'string' ? sd.key.slice(0, 10) : '',
+    originalKey: typeof sd.originalKey === 'string' ? sd.originalKey.slice(0, 10) : '',
+    bpm: (typeof sd.bpm === 'string' || typeof sd.bpm === 'number') ? String(sd.bpm).slice(0, 10) : '',
+    category: typeof sd.category === 'string' ? sd.category.slice(0, 50) : '',
+    chordpro: typeof sd.chordpro === 'string' ? sd.chordpro.slice(0, 50000) : '',
+    capo: typeof sd.capo === 'number' ? sd.capo : 0,
+    sectionNotes: (sd.sectionNotes && typeof sd.sectionNotes === 'object' && !Array.isArray(sd.sectionNotes)) ? sd.sectionNotes : {},
+    inlineComments: (sd.inlineComments && typeof sd.inlineComments === 'object' && !Array.isArray(sd.inlineComments)) ? sd.inlineComments : {}
+  };
+}
 function importSingleSetlist(slData) {
 const newSlId = getNextId(setlists);
 const newSongs = [];
