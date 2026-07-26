@@ -1178,6 +1178,16 @@ async function loadSessionsForProfile() {
 }
 // === CLOUD DATA SYNC ===
 
+function mergeTeamsFromCloud(remoteTeams) {
+    if (!remoteTeams) return false;
+    let changed = false;
+    const localIds = new Set(teams.map(t => t.id));
+    remoteTeams.forEach(rt => { if (!localIds.has(rt.id)) { teams.push(rt); changed = true; } });
+    const remoteIds = new Set(remoteTeams.map(t => t.id));
+    const filtered = teams.filter(t => remoteIds.has(t.id));
+    if (filtered.length !== teams.length) { teams = filtered; changed = true; }
+    return changed;
+}
 // Load user data from cloud
 async function loadUserDataFromCloud() {
     if (!currentUser) return;
@@ -1198,8 +1208,7 @@ async function loadUserDataFromCloud() {
                 localStorage.setItem('clc_setlists', JSON.stringify(setlists));
                 updated = true;
             }
-            if (data.teams && JSON.stringify(data.teams) !== JSON.stringify(teams)) {
-                teams = data.teams;
+           if (data.teams && mergeTeamsFromCloud(data.teams)) {
                 localStorage.setItem('clc_teams', JSON.stringify(teams));
                 updated = true;
             }
@@ -1250,7 +1259,7 @@ async function saveUserDataToCloud() {
         await db.collection('users').doc(currentUser.uid).set({
             songs: songs.filter(s => !s.fromTeam),
             setlists: setlists.filter(sl => !sl.fromTeamSync),
-            teams: teams,
+            teams: teams.map(t => ({ id: t.id, createdAt: t.createdAt || null, joinedByLink: t.joinedByLink || false })),
             sectionNotes: sectionNotes,
             inlineComments: inlineComments,
             avatar: localAvatar || null,  // === НОВОЕ: Сохраняем аватарку ===
@@ -1279,9 +1288,9 @@ function startCloudSync() {
                 if (data.setlists && JSON.stringify(data.setlists) !== JSON.stringify(setlists)) {
                     setlists = data.setlists; needsRender = true;
                 }
-                if (data.teams && JSON.stringify(data.teams) !== JSON.stringify(teams)) {
-                    teams = data.teams; needsRender = true;
-                }
+               if (data.teams && mergeTeamsFromCloud(data.teams)) {
+                    needsRender = true;
+                }
                 teams.forEach(t => startTeamDataListener(t.id));
                 if (data.sectionNotes) { sectionNotes = data.sectionNotes; needsRender = true; }
                 if (data.inlineComments) { inlineComments = data.inlineComments; needsRender = true; }
@@ -2189,50 +2198,46 @@ if (err.name === 'AbortError') return;
 }
 downloadJson(fileData, filename);
 }
-async function shareSetlistToTeam(setlistId, teamId) {
-const sl = setlists.find(x => x.id === setlistId);
-const team = teams.find(t => t.id === teamId);
-if (!sl || !team) return;
-if (!confirm(`Отправить сет-лист «${sl.name}» в команду «${team.name}»?`)) return;
-if (!db || !currentUser) { alert('❌ Нет подключения к облаку'); return; }
-const songsToShare = sl.songs.map(item => {
-const s = songs.find(x => x.id === item.id);
-return s ? { ...s } : null;
-}).filter(Boolean);
-const docRef = db.collection('teamData').doc(teamId);
-try {
-await db.runTransaction(async (tx) => {
-const doc = await tx.get(docRef);
-const data = doc.exists ? doc.data() : { songs: [], setlists: [] };
-const teamSongs = data.songs || [];
-const teamSetlists = data.setlists || [];
-songsToShare.forEach(s => {
-const idx = teamSongs.findIndex(ts => ts.id === s.id);
-if (idx !== -1) teamSongs[idx] = s; else teamSongs.push(s);
-});
-const existingIdx = teamSetlists.findIndex(ts => ts.name.toLowerCase() === sl.name.toLowerCase() && ts.date === sl.date);
-const sharedSetlist = {
-id: existingIdx !== -1 ? teamSetlists[existingIdx].id : getNextId(teamSetlists),
-date: sl.date,
-time: sl.time || '',
-name: sl.name,
-isArchived: false,
-sharedBy: currentUser.uid,
-sharedAt: Date.now(),
-songs: sl.songs.map(item => ({ ...item }))
-};
-if (existingIdx !== -1) teamSetlists[existingIdx] = sharedSetlist; else teamSetlists.push(sharedSetlist);
-tx.set(docRef, { songs: teamSongs, setlists: teamSetlists, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid });
-});
-sl.sharedToTeams = sl.sharedToTeams || [];
-if (!sl.sharedToTeams.includes(teamId)) sl.sharedToTeams.push(teamId);
-saveToStorage();
-closeModal('modal-share-setlist');
-renderSetlists();
-alert(`✅ Сет-лист «${sl.name}» отправлен в команду «${team.name}»!\nОн появится у всех участников автоматически.`);
-} catch (err) {
-alert('❌ Не удалось отправить сет-лист: ' + err.message);
+async function publishSetlistToTeamData(sl, teamId) {
+    if (!db || !currentUser) return false;
+    const songsToShare = sl.songs.map(item => {
+        const s = songs.find(x => x.id === item.id);
+        return s ? { ...s } : null;
+    }).filter(Boolean);
+    const docRef = db.collection('teamData').doc(teamId);
+    await db.runTransaction(async (tx) => {
+        const doc = await tx.get(docRef);
+        const data = doc.exists ? doc.data() : { songs: [], setlists: [] };
+        const teamSongs = data.songs || [];
+        const teamSetlists = data.setlists || [];
+        songsToShare.forEach(s => {
+            const idx = teamSongs.findIndex(ts => ts.id === s.id);
+            if (idx !== -1) teamSongs[idx] = s; else teamSongs.push(s);
+        });
+        const existingIdx = teamSetlists.findIndex(ts => ts.name.toLowerCase() === sl.name.toLowerCase() && ts.date === sl.date);
+        const sharedSetlist = { id: existingIdx !== -1 ? teamSetlists[existingIdx].id : getNextId(teamSetlists), date: sl.date, time: sl.time || '', name: sl.name, isArchived: false, sharedBy: currentUser.uid, sharedAt: Date.now(), songs: sl.songs.map(item => ({ ...item })) };
+        if (existingIdx !== -1) teamSetlists[existingIdx] = sharedSetlist; else teamSetlists.push(sharedSetlist);
+        tx.set(docRef, { songs: teamSongs, setlists: teamSetlists, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid });
+    });
+    sl.sharedToTeams = sl.sharedToTeams || [];
+    if (!sl.sharedToTeams.includes(teamId)) sl.sharedToTeams.push(teamId);
+    return true;
 }
+async function shareSetlistToTeam(setlistId, teamId) {
+    const sl = setlists.find(x => x.id === setlistId);
+    const team = teams.find(t => t.id === teamId);
+    if (!sl || !team) return;
+    if (!confirm(`Отправить сет-лист «${sl.name}» в команду «${team.name}»?`)) return;
+    if (!db || !currentUser) { alert('❌ Нет подключения к облаку'); return; }
+    try {
+        await publishSetlistToTeamData(sl, teamId);
+        saveToStorage();
+        closeModal('modal-share-setlist');
+        renderSetlists();
+        alert(`✅ Сет-лист «${sl.name}» отправлен в команду «${team.name}»!\nОн появится у всех участников автоматически.`);
+    } catch (err) {
+        alert('❌ Не удалось отправить сет-лист: ' + err.message);
+    }
 }
 function convertBtoH(chord) { if (chord.includes('/')) { const parts = chord.split('/'); return convertBtoH(parts[0]) + '/' + convertBtoH(parts[1]); } if (chord.startsWith('B') && !chord.startsWith('Bb')) return 'H' + chord.substring(1); return chord; }
 function cleanWordForChordCheck(word) { return word.replace(/^[.,;:!?|()\-—–·\s]+|[.,;:!?|()\-—–·\s]+$/g, ''); }
@@ -2520,22 +2525,25 @@ div.onclick = () => clearSetlistSearchAndOpen(sl.id); list.appendChild(div); });
 updateCarouselBadges();
 }
 function openSetlistModal() { document.getElementById('sl-date').value = getCurrentDate(); document.getElementById('sl-time').value = getCurrentTime(); document.getElementById('sl-name').value = ''; document.getElementById('modal-setlist').classList.add('show'); }
-function saveSetlist() {
-const date = document.getElementById('sl-date').value;
-const time = document.getElementById('sl-time').value;
-const name = document.getElementById('sl-name').value;
-if (!name || !date) return;
-const newId = getNextId(setlists);
-const teamId = document.getElementById('modal-setlist').dataset.teamId || null;
-setlists.push({id: newId, date, time: time || '', name, isArchived: false, teamId: teamId, songs: []});
-saveToStorage();
-closeModal('modal-setlist');
-delete document.getElementById('modal-setlist').dataset.teamId;
-if (teamId) {
-showTeamDetailView(teamId);
-} else {
-renderSetlists();
-}
+async function saveSetlist() {
+    const date = document.getElementById('sl-date').value;
+    const time = document.getElementById('sl-time').value;
+    const name = document.getElementById('sl-name').value;
+    if (!name || !date) return;
+    const newId = getNextId(setlists);
+    const teamId = document.getElementById('modal-setlist').dataset.teamId || null;
+    const newSl = {id: newId, date, time: time || '', name, isArchived: false, teamId: teamId, songs: []};
+    setlists.push(newSl);
+    saveToStorage();
+    closeModal('modal-setlist');
+    delete document.getElementById('modal-setlist').dataset.teamId;
+    if (teamId) {
+        try { await publishSetlistToTeamData(newSl, teamId); saveToStorage(); }
+        catch (err) { console.error('Не удалось опубликовать сет-лист в команде:', err); }
+        showTeamDetailView(teamId);
+    } else {
+        renderSetlists();
+    }
 }
 function openEditSetlistModal(id) { const sl = setlists.find(x => x.id === id); document.getElementById('edit-sl-date').value = sl.date; document.getElementById('edit-sl-time').value = sl.time || ''; document.getElementById('edit-sl-name').value = sl.name; currentSlId = id; document.getElementById('modal-edit-setlist').classList.add('show'); }
 function saveEditSetlist() { const date = document.getElementById('edit-sl-date').value; const time = document.getElementById('edit-sl-time').value; const name = document.getElementById('edit-sl-name').value; if (!name || !date) return; const sl = setlists.find(x => x.id === currentSlId); if (sl) { sl.date = date; sl.time = time || ''; sl.name = name; } saveToStorage(); closeModal('modal-edit-setlist'); renderSetlists(); if (document.getElementById('page-setlist-detail').classList.contains('active')) { document.getElementById('sl-detail-title').innerHTML = `<span style="font-size: 14px; font-weight: bold;">${sl.name}</span> <span style="font-size: 14px; color: #888; font-weight: normal; margin-left: 8px;">(${formatSetlistDate(sl.date, sl.time)})</span>`; renderSlSongs(); } }
