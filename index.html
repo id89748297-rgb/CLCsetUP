@@ -1790,7 +1790,7 @@ if (team) {
 team.name = newName;
 team.password = newPassword;
 if (avatarData !== undefined) team.avatar = avatarData;
-if (db && currentUser) db.collection('teamRegistry').doc(team.id).set({ name: newName, password: newPassword, avatar: avatarData !== undefined ? avatarData : (team.avatar || null), createdBy: currentUser.uid, createdAt: team.createdAt || Date.now(), members: firebase.firestore.FieldValue.arrayUnion(currentUser.uid) }, { merge: true }).catch(err => console.error('teamRegistry sync failed:', err));
+if (db && currentUser) db.collection('teamRegistry').doc(team.id).set({ name: newName, password: newPassword, avatar: avatarData !== undefined ? avatarData : (team.avatar || null), createdAt: team.createdAt || Date.now(), members: firebase.firestore.FieldValue.arrayUnion(currentUser.uid) }, { merge: true }).catch(err => console.error('teamRegistry sync failed:', err));
 }
 } else {
 const id = 'team_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
@@ -1963,7 +1963,7 @@ if (registry.password && registry.password !== password) {
 alert('❌ Неверный пароль команды');
 return;
 }
-const updatedMembers = Array.from(new Set([...(registry.members || []), currentUser.uid]));
+const updatedMembers = Array.from(new Set([...(registry.members || []), registry.createdBy, currentUser.uid].filter(Boolean)));
 try {
 await db.collection('teamRegistry').doc(teamId).update({ members: firebase.firestore.FieldValue.arrayUnion(currentUser.uid) });
 } catch (err) {
@@ -2001,7 +2001,7 @@ const newSl = {
 id: newId,
 date: sl.date,
 time: sl.time || '',
-name: sl.name + ' (копия)',
+name: sl.name,
 isArchived: false,
 teamId: null,
 songs: sl.songs.map(item => ({...item})),
@@ -2018,7 +2018,8 @@ function applyTeamOverlay(teamId) {
 const data = teamDataCache[teamId];
 if (!data) return;
 songs = songs.filter(s => s.fromTeam !== teamId);
-setlists = setlists.filter(sl => !(sl.teamId === teamId && sl.fromTeamSync));
+const cacheIds = new Set((data.setlists || []).map(s => s.id));
+setlists = setlists.filter(sl => !(sl.teamId === teamId && (sl.fromTeamSync || cacheIds.has(sl.id))));
 (data.songs || []).forEach(s => songs.push({ ...s, fromTeam: teamId }));
 (data.setlists || []).forEach(sl => setlists.push({ ...sl, teamId: teamId, fromTeamSync: true }));
 }
@@ -2221,7 +2222,7 @@ async function publishSetlistToTeamData(sl, teamId) {
         if (existingIdx === -1) {
             existingIdx = teamSetlists.findIndex(ts => ts.name.toLowerCase() === sl.name.toLowerCase() && ts.date === sl.date);
         }
-        const sharedSetlist = { id: existingIdx !== -1 ? teamSetlists[existingIdx].id : sl.id, date: sl.date, time: sl.time || '', name: sl.name, isArchived: false, sharedBy: currentUser.uid, sharedAt: Date.now(), songs: sl.songs.map(item => ({ ...item })) };
+        const sharedSetlist = { id: existingIdx !== -1 ? teamSetlists[existingIdx].id : sl.id, date: sl.date, time: sl.time || '', name: sl.name, isArchived: !!sl.isArchived, sharedBy: currentUser.uid, sharedAt: Date.now(), songs: sl.songs.map(item => ({ ...item })) };
         if (existingIdx !== -1) teamSetlists[existingIdx] = sharedSetlist; else teamSetlists.push(sharedSetlist);
         assignedId = sharedSetlist.id;
         tx.set(docRef, { songs: teamSongs, setlists: teamSetlists, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid });
