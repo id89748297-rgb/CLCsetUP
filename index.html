@@ -2223,6 +2223,11 @@ async function publishSetlistToTeamData(sl, teamId) {
     if (!sl.sharedToTeams.includes(teamId)) sl.sharedToTeams.push(teamId);
     return true;
 }
+function syncSetlistIfTeam(sl) {
+    if (sl && sl.teamId) {
+        publishSetlistToTeamData(sl, sl.teamId).catch(err => console.error('Team sync error:', err));
+    }
+}
 async function shareSetlistToTeam(setlistId, teamId) {
     const sl = setlists.find(x => x.id === setlistId);
     const team = teams.find(t => t.id === teamId);
@@ -2648,6 +2653,7 @@ if (!isNaN(fi) && !isNaN(ti) && fi !== ti) {
 const [moved] = sl.songs.splice(fi, 1);
 sl.songs.splice(ti, 0, moved);
 saveToStorage();
+syncSetlistIfTeam(sl);
 renderSlSongs();
 }
 });
@@ -2655,8 +2661,8 @@ div.addEventListener('dragend', () => { div.classList.remove('dragging'); docume
 div.onclick = (e) => { if(e.target.tagName !== 'BUTTON' && e.target.tagName !== 'SELECT' && e.target.tagName !== 'INPUT' && !e.target.closest('button') && !e.target.closest('select') && !e.target.closest('input')) { homeSongIndex = idx; openSongView(item.id, currentSlId); } };
 list.appendChild(div); });
 }
-function confirmRemoveFromSl(songId, songName) { showDeleteConfirm('remove', songId, `Песню "${songName}" из сет-листа`, () => { const sl = setlists.find(x => x.id === currentSlId); sl.songs = sl.songs.filter(x => x.id !== songId); saveToStorage(); renderSlSongs(); }); }
-function changeSongKeyInSetlist(songId, newKey) { const sl = setlists.find(x => x.id === currentSlId); const item = sl.songs.find(x => x.id === songId); if (item) { item.key = newKey; saveToStorage(); } }
+function confirmRemoveFromSl(songId, songName) { showDeleteConfirm('remove', songId, `Песню "${songName}" из сет-листа`, () => { const sl = setlists.find(x => x.id === currentSlId); sl.songs = sl.songs.filter(x => x.id !== songId); saveToStorage(); syncSetlistIfTeam(sl); renderSlSongs(); }); }
+function changeSongKeyInSetlist(songId, newKey) { const sl = setlists.find(x => x.id === currentSlId); const item = sl.songs.find(x => x.id === songId); if (item) { item.key = newKey; saveToStorage(); syncSetlistIfTeam(sl); } }
 function openAddSongToSlModal() { document.getElementById('add-song-search').value = ''; renderAddSongList(); document.getElementById('modal-add-song').classList.add('show'); }
 function renderAddSongList() {
 const q = document.getElementById('add-song-search').value.toLowerCase(); const sl = setlists.find(x => x.id === currentSlId); const list = document.getElementById('add-song-list'); list.innerHTML = '';
@@ -2666,6 +2672,7 @@ filtered.forEach(s => { const div = document.createElement('div'); div.className
 div.onclick = () => {
 sl.songs.push({id: s.id, capo: 0, key: null, chordpro: null, columns: currentColumns, fontSize});
 saveToStorage();
+syncSetlistIfTeam(sl);
 document.getElementById('add-song-search').value = '';
 renderAddSongList();
 renderSlSongs();
