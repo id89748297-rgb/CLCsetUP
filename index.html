@@ -2035,7 +2035,9 @@ if (!team) return;
 team.name = data.name;
 team.avatar = data.avatar || null;
 team.password = data.password || '';
-team.members = data.members || [];
+const membersSet = new Set(data.members || []);
+if (data.createdBy) membersSet.add(data.createdBy);
+team.members = Array.from(membersSet);
 saveToStorage();
 renderCarousel();
 if (currentHomeView === 'teams') showTeamsView();
@@ -2228,6 +2230,19 @@ async function publishSetlistToTeamData(sl, teamId) {
     sl.sharedToTeams = sl.sharedToTeams || [];
     if (!sl.sharedToTeams.includes(teamId)) sl.sharedToTeams.push(teamId);
     return true;
+}
+async function removeSetlistFromTeamData(setlistId, teamId) {
+    if (!db || !currentUser || !teamId) return;
+    const docRef = db.collection('teamData').doc(teamId);
+    try {
+        await db.runTransaction(async (tx) => {
+            const doc = await tx.get(docRef);
+            if (!doc.exists) return;
+            const data = doc.data();
+            const teamSetlists = (data.setlists || []).filter(ts => ts.id !== setlistId);
+            tx.update(docRef, { setlists: teamSetlists, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid });
+        });
+    } catch (err) { console.error('Team delete sync error:', err); }
 }
 function syncSetlistIfTeam(sl) {
     if (sl && sl.teamId) {
@@ -2565,6 +2580,7 @@ const sl = setlists.find(x => x.id === pendingSetlistAction.id);
 if (sl) {
 sl.isArchived = true;
 saveToStorage();
+syncSetlistIfTeam(sl);
 if (!document.getElementById('page-setlist-detail').classList.contains('active')) {
 renderSetlists();
 if (sl.teamId) showTeamDetailView(sl.teamId);
@@ -2580,6 +2596,8 @@ const teamId = sl ? sl.teamId : null;
 const wasOnDetailPage = document.getElementById('page-setlist-detail').classList.contains('active');
 setlists = setlists.filter(x => x.id !== pendingSetlistAction.id);
 saveToStorage();
+if (teamId) removeSetlistFromTeamData(pendingSetlistAction.id, teamId);
+ 
 if (wasOnDetailPage) {
 if (teamId) {
 showPage('page-home');
@@ -2607,13 +2625,14 @@ const sl = setlists.find(x => x.id === pendingSetlistAction.id);
 if (sl) {
 sl.isArchived = false;
 saveToStorage();
+syncSetlistIfTeam(sl);
 renderSetlists();
 if (sl.teamId) showTeamDetailView(sl.teamId);
 }
 closeModal('modal-archive-setlist');
 pendingSetlistAction = null;
 }
-function archiveCurrentSetlist() { const sl = setlists.find(x => x.id === currentSlId); if (!sl) return; if (confirm(`Отправить "${sl.name}" в архив?`)) { sl.isArchived = true; saveToStorage(); goBackFromSetlistDetail(); } }
+function archiveCurrentSetlist() { const sl = setlists.find(x => x.id === currentSlId); if (!sl) return; if (confirm(`Отправить "${sl.name}" в архив?`)) { sl.isArchived = true; saveToStorage(); syncSetlistIfTeam(sl); goBackFromSetlistDetail(); } }
 function openSetlistDetail(id) { currentSlId = id; const sl = setlists.find(x => x.id === id); document.getElementById('sl-detail-title').innerHTML = `<span style="font-size: 14px; font-weight: bold;">${sl.name}</span> <span style="font-size: 14px; color: #888; font-weight: normal; margin-left: 8px;">(${formatSetlistDate(sl.date, sl.time)})</span>`; document.getElementById('sl-subtitle').innerText = 'Сет-лист'; renderSlSongs(); showPage('page-setlist-detail'); }
 function goBackFromSetlistDetail() {
 const sl = setlists.find(x => x.id === currentSlId);
