@@ -2205,6 +2205,7 @@ async function publishSetlistToTeamData(sl, teamId) {
         return s ? { ...s } : null;
     }).filter(Boolean);
     const docRef = db.collection('teamData').doc(teamId);
+    let assignedId = null;
     await db.runTransaction(async (tx) => {
         const doc = await tx.get(docRef);
         const data = doc.exists ? doc.data() : { songs: [], setlists: [] };
@@ -2214,11 +2215,16 @@ async function publishSetlistToTeamData(sl, teamId) {
             const idx = teamSongs.findIndex(ts => ts.id === s.id);
             if (idx !== -1) teamSongs[idx] = s; else teamSongs.push(s);
         });
-        const existingIdx = teamSetlists.findIndex(ts => ts.name.toLowerCase() === sl.name.toLowerCase() && ts.date === sl.date);
-        const sharedSetlist = { id: existingIdx !== -1 ? teamSetlists[existingIdx].id : getNextId(teamSetlists), date: sl.date, time: sl.time || '', name: sl.name, isArchived: false, sharedBy: currentUser.uid, sharedAt: Date.now(), songs: sl.songs.map(item => ({ ...item })) };
+        let existingIdx = teamSetlists.findIndex(ts => ts.id === sl.id);
+        if (existingIdx === -1) {
+            existingIdx = teamSetlists.findIndex(ts => ts.name.toLowerCase() === sl.name.toLowerCase() && ts.date === sl.date);
+        }
+        const sharedSetlist = { id: existingIdx !== -1 ? teamSetlists[existingIdx].id : sl.id, date: sl.date, time: sl.time || '', name: sl.name, isArchived: false, sharedBy: currentUser.uid, sharedAt: Date.now(), songs: sl.songs.map(item => ({ ...item })) };
         if (existingIdx !== -1) teamSetlists[existingIdx] = sharedSetlist; else teamSetlists.push(sharedSetlist);
+        assignedId = sharedSetlist.id;
         tx.set(docRef, { songs: teamSongs, setlists: teamSetlists, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid });
     });
+    if (assignedId !== null && assignedId !== sl.id) sl.id = assignedId;
     sl.sharedToTeams = sl.sharedToTeams || [];
     if (!sl.sharedToTeams.includes(teamId)) sl.sharedToTeams.push(teamId);
     return true;
@@ -3040,12 +3046,13 @@ const item = sl.songs.find(x => x.id === currentSongId);
 if (item) {
 item.key = currentKey;
 item.capo = currentCapo;
-item.columns = currentColumns;
 item.fontSize = fontSize;
 item.accidental = currentAccidental;
 item.hideChords = currentHideChords;
 item.hideLyrics = currentHideLyrics;
+sl.songs.forEach(it => { it.columns = currentColumns; });
 saveToStorage();
+syncSetlistIfTeam(sl);
 saveDefaultSettings();
 alert(`✅ Сохранено ЛОКАЛЬНО (в этом сет-листе):\nТональность: ${currentKey}\nCapo: ${currentCapo}\nКолонки: ${currentColumns}\nРазмер: ${fontSize}\nТекст: ${currentHideLyrics ? 'скрыт' : 'виден'}`);
 return;
@@ -3088,7 +3095,7 @@ openSongView(homeFilteredSongs[homeSongIndex].id, null);
 }
 function changeKey(value) { currentKey = value; updateSongView(); }
 function changeCapo(value) { currentCapo = parseInt(value); updateSongView(); }
-function changeColumns(value) { currentColumns = parseInt(value); syncColumnsSelects(value); updateSongView(); if (!window.matchMedia('(hover: hover) and (pointer: fine) and (min-width: 769px)').matches) { const s = songs.find(x => x.id === currentSongId); if (s) { s.columns = currentColumns; saveToStorage(); } if (currentSlId) { const sl = setlists.find(x => x.id === currentSlId); const item = sl?.songs.find(x => x.id === currentSongId); if (item) { item.columns = currentColumns; saveToStorage(); } } } }
+function changeColumns(value) { currentColumns = parseInt(value); syncColumnsSelects(value); updateSongView(); if (!window.matchMedia('(hover: hover) and (pointer: fine) and (min-width: 769px)').matches) { const s = songs.find(x => x.id === currentSongId); if (s) { s.columns = currentColumns; saveToStorage(); } if (currentSlId) { const sl = setlists.find(x => x.id === currentSlId); if (sl) { sl.songs.forEach(it => { it.columns = currentColumns; }); saveToStorage(); syncSetlistIfTeam(sl); } } } }
 function updateSongView() { const s = songs.find(x => x.id === currentSongId); if (!s) return; let text = s.chordpro; if (currentSlId) { const sl = setlists.find(x => x.id === currentSlId); const item = sl?.songs.find(x => x.id === currentSongId); if (item?.chordpro) text = item.chordpro; }
 renderSongLinks(extractUrlsFromChordpro(text));
 renderSongContent(text, originalKey, currentKey, currentCapo);
