@@ -128,12 +128,15 @@ return out;
 // === подпись VAPID (RFC 8292): JWT ES256 ===
 async function vapidAuthorization(audience) {
 const header = { typ: 'JWT', alg: 'ES256' };
-const payload = { aud: audience, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: 'mailto:chat-app@worship.local' };
+// Apple требует реальный домен в sub — берём домен текущего сайта
+const sub = 'mailto:admin@' + (location.hostname || 'clcsetup.vercel.app');
+const payload = { aud: audience, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub };
 const encPart = (obj) => bytesToB64Url(new TextEncoder().encode(JSON.stringify(obj)));
 const unsigned = encPart(header) + '.' + encPart(payload);
 const key = await crypto.subtle.importKey('pkcs8', b64UrlToBytes(PUSH_VAPID_PRIVATE_PKCS8_B64), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
 const sig = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(unsigned)));
-return 'vapid t=' + unsigned + '.' + bytesToB64Url(sig) + ', k=' + PUSH_VAPID_K_B64;
+// Apple принимает только 65-байтовый несжатый ключ (PUSH_VAPID_PUBLIC_B64)
+return 'vapid t=' + unsigned + '.' + bytesToB64Url(sig) + ', k=' + PUSH_VAPID_PUBLIC_B64;
 }
 
 // === рассылка участникам команды (кроме себя) ===
