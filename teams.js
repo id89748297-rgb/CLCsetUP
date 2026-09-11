@@ -1,6 +1,7 @@
 // === ЧАТ-ПРИЛОЖЕНИЕ: список команд + чат ===
 
 let chatReplyTo = null; // текущий ответ (реплай): { id, name, text }
+const CHAT_EDIT_WINDOW_MS = 48 * 60 * 60 * 1000; // окно редактирования — 48 часов, как в Telegram
 
 function saveTeamsLocal() {
 try { localStorage.setItem('clc_teams', JSON.stringify(teams)); } catch (e) {}
@@ -420,6 +421,11 @@ ${reactionsHtml}
 }
 return dateDivider + bubbleHtml;
 }).join('');
+// Подсветка сообщения, к которому прыгнули по цитате (переживает перерисовку списка)
+if (window.__highlightMsgId) {
+const hl = list.querySelector('#chat-msg-' + window.__highlightMsgId);
+if (hl) hl.style.background = 'rgba(66,165,245,0.25)';
+}
 }
 function handleChatInputKeydown(e) {
 }
@@ -486,7 +492,8 @@ options.push(['star', msg.starred ? '⭐ Убрать из избранного'
 const teamForPin = teams.find(t => t.id === teamId);
 const isPinned = teamForPin && teamForPin.pinnedChatMsg && teamForPin.pinnedChatMsg.id === msgId;
 options.push(isPinned ? ['unpin', '📌 Открепить'] : ['pin', '📌 Закрепить']);
-if (isMine && !allRead) options.push(['edit', '✏️ Изменить']);
+if (!msg.deleted) options.push(['copy', '📋 Скопировать']);
+if (isMine && !allRead && (Date.now() - msg.createdAt < CHAT_EDIT_WINDOW_MS)) options.push(['edit', '✏️ Изменить']);
 if (isMine || isOwnerOrAdmin) options.push(['delete', '🗑️ Удалить сообщение']);
 if (!isMine && isOwnerOrAdmin) options.push(['deleteAllKick', '⛔ Удалить все сообщения и исключить']);
 if (options.length === 0) return;
@@ -508,6 +515,7 @@ e.stopPropagation();
 const action = el.dataset.action;
 closeChatMsgMenuPopup();
 if (action === 'reply') setChatReplyTo(msg);
+else if (action === 'copy') copyChatText(msg.text);
 else if (action === 'react') showReactionPicker(teamId, msgId, x, y);
 else if (action === 'star') toggleStarChatMessage(teamId, msgId);
 else if (action === 'pin') pinChatMessage(teamId, msgId);
@@ -786,25 +794,36 @@ mode = Math.abs(mdx) > Math.abs(mdy) ? 1 : 2;
 if (mode === 1) { clearTimeout(window.__chatPressTimer); window.__chatPressFired = true; }
 }
 if (mode !== 1) return;
-const allowLeft = bubble.classList.contains('chat-bubble-me');
-dx = Math.max(-100, Math.min(140, mdx));
-if (dx < 0 && !allowLeft) dx = 0;
-bubble.style.transform = dx > 0
-? `translateX(${Math.min(dx, 90) * 0.6}px)`
-: `translateX(${Math.max(dx, -70) * 0.4}px)`;
+// свайп только вправо — «ответить» (редактирование — через удержание)
+dx = Math.min(140, Math.max(0, mdx));
+bubble.style.transform = `translateX(${Math.min(dx, 90) * 0.6}px)`;
 }, { passive: true });
-list.addEventListener('touchend', () => {
+list.addEventListener('touchend', (e) => {
 if (!bubble) return;
 const b = bubble; bubble = null;
 b.style.transition = 'transform 0.15s ease';
 b.style.transform = '';
-if (mode !== 1) return;
+const msgId0 = (b.id || '').replace('chat-msg-', '');
+if (mode !== 1) {
+// двойной тап (телефон) — сердечко; браузерный dblclick на тачах не срабатывает
+const tx = e.changedTouches[0].clientX - sx;
+const ty = e.changedTouches[0].clientY - sy;
+if (Math.abs(tx) < 12 && Math.abs(ty) < 12) {
+const now = Date.now();
+if (list.__lastTapAt && now - list.__lastTapAt < 320) {
+list.__lastTapAt = 0;
+toggleChatReaction(currentChatTeamId, msgId0, '❤️');
+} else {
+list.__lastTapAt = now;
+}
+}
+return;
+}
 const teamId = currentChatTeamId;
 const msgId = (b.id || '').replace('chat-msg-', '');
 const msg = (chatMessagesCache[teamId] || []).find(m => m.id === msgId);
 if (!msg || msg.deleted) return;
 if (dx > 60) { if (navigator.vibrate) navigator.vibrate(20); setChatReplyTo(msg); }
-else if (dx < -45) { if (navigator.vibrate) navigator.vibrate(20); startEditChatMessage(msgId); }
 }, { passive: true });
 // Двойной тап мышью (компьютер) — сердечко
 list.addEventListener('dblclick', (e) => {
@@ -890,8 +909,31 @@ banner.innerHTML = `<div style="min-width:0;flex:1;border-left:3px solid #42a5f5
 function scrollToChatMessage(msgId) {
 const el = document.getElementById('chat-msg-' + msgId);
 if (!el) { showToast('Сообщение выше загруженной истории — прокрутите вверх и повторите', 'info'); return; }
+window.__highlightMsgId = msgId;
 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-el.style.transition = 'background 1.2s';
 el.style.background = 'rgba(66,165,245,0.25)';
-setTimeout(() => { el.style.background = ''; }, 1200);
+setTimeout(() => {
+window.__highlightMsgId = null;
+const el2 = document.getElementById('chat-msg-' + msgId);
+if (el2) el2.style.background = '';
+}, 2500);
+}
+async function copyChatText(text) {
+const t = text || '';
+try {
+if (navigator.clipboard && navigator.clipboard.writeText) {
+await navigator.clipboard.writeText(t);
+} else {
+const ta = document.createElement('textarea');
+ta.value = t;
+document.body.appendChild(ta);
+ta.select();
+document.execCommand('copy');
+ta.remove();
+}
+showToast('📋 Скопировано', 'success');
+} catch (err) {
+console.error('copy failed:', err);
+showToast('❌ Не удалось скопировать', 'error');
+}
 }
