@@ -114,6 +114,7 @@ setupChatKeyboardHandling();
 setupChatFixedAreasTouchBlock();
 setupChatTouchGuard();
 setupChatFocusPin();
+setupChatSwipeBack();
 lockBodyScroll();
 setTimeout(adjustChatForKeyboard, 50);
 if (!chatMessagesCache[teamId]) chatMessagesCache[teamId] = [];
@@ -219,6 +220,27 @@ if (chatActive()) { window.scrollTo(0, 0); adjustChatForKeyboard(); }
 input.addEventListener('blur', () => setTimeout(() => {
 if (chatActive()) window.scrollTo(0, 0);
 }, 100));
+}
+function setupChatSwipeBack() {
+if (window.__chatSwipeBackBound) return;
+window.__chatSwipeBackBound = true;
+const page = document.getElementById('page-team-chat');
+if (!page) return;
+let sx = 0, sy = 0, tracking = false;
+page.addEventListener('touchstart', (e) => {
+if (e.target.closest('textarea, input, button, select')) { tracking = false; return; }
+sx = e.touches[0].clientX;
+sy = e.touches[0].clientY;
+// ловим жест только от левого края (~60px) — как нативный «назад» на iOS
+tracking = sx < 60;
+}, { passive: true });
+page.addEventListener('touchend', (e) => {
+if (!tracking) return;
+tracking = false;
+const dx = e.changedTouches[0].clientX - sx;
+const dy = e.changedTouches[0].clientY - sy;
+if (dx > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) closeTeamChat();
+}, { passive: true });
 }
 function setupChatKeyboardHandling() {
 if (!window.visualViewport || window.__chatKeyboardHandlerBound) return;
