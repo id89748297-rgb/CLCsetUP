@@ -1,56 +1,24 @@
-// sw.js — Service Worker для Worship SetUP
-const CACHE_NAME = 'worship-setup-v1';
-const ASSETS_TO_CACHE = [
-  './',
-  './index.html',
-  './manifest.json',
-  './icon-192.png',
-  './icon-512.png',
-  './icon-180.png'
-];
+// === СЕРВИС-ВОРКЕР: приёмник push-уведомлений ===
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (e) => e.waitUntil(clients.claim()));
 
-// Установка: кэшируем все нужные файлы
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(ASSETS_TO_CACHE))
-      .then(() => self.skipWaiting())
-  );
+self.addEventListener('push', (event) => {
+let data = {};
+try { data = event.data.json(); } catch (err) { data = { title: 'Чат команды', body: 'Новое сообщение' }; }
+event.waitUntil(self.registration.showNotification(data.title || 'Чат команды', {
+body: data.body || 'Новое сообщение',
+tag: data.tag || 'clc-chat',
+renotify: true,
+data: { url: data.url || './' }
+}));
 });
 
-// Активация: удаляем старые кэши
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
-      )
-    ).then(() => self.clients.claim())
-  );
-});
-
-// Перехват запросов: отдаём из кэша, если есть, иначе из сети
-self.addEventListener('fetch', (event) => {
-  // Игнорируем не-GET запросы
-  if (event.request.method !== 'GET') return;
-
-  event.respondWith(
-    caches.match(event.request)
-      .then(cached => {
-        // Всегда пытаемся обновить из сети в фоне
-        const fetchPromise = fetch(event.request)
-          .then(response => {
-            if (response && response.status === 200) {
-              const clone = response.clone();
-              caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-            }
-            return response;
-          })
-          .catch(() => cached);
-
-        // Возвращаем кэш сразу (быстро), либо ждём сеть
-        return cached || fetchPromise;
-      })
-      .catch(() => caches.match('./index.html'))
-  );
+self.addEventListener('notificationclick', (event) => {
+event.notification.close();
+event.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+for (const c of list) {
+if ('focus' in c) { c.navigate(event.notification.data && event.notification.data.url || './').catch(() => {}); return c.focus(); }
+}
+return clients.openWindow(event.notification.data && event.notification.data.url || './');
+}));
 });

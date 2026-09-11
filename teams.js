@@ -41,6 +41,7 @@ ${avatarHtml}
 ${unread ? `<span style="background:#ef5350;color:#fff;font-size:11px;font-weight:bold;min-width:20px;height:20px;border-radius:10px;display:flex;align-items:center;justify-content:center;padding:0 6px;">${unread}</span>` : ''}
 </div>`;
 }).join('');
+if (typeof renderPushButton === 'function') renderPushButton();
 }
 
 function toggleTeamPin(teamId) {
@@ -448,6 +449,9 @@ if (chatReplyTo) msgData.replyTo = chatReplyTo;
 await db.collection('teamRegistry').doc(teamId).collection('chat').add(msgData);
 chatReplyTo = null;
 renderChatReplyPreview();
+// push-уведомление всем участникам, кроме себя
+const pushTeam = teams.find(t => t.id === teamId);
+sendPushToTeam(teamId, '💬 ' + ((pushTeam && pushTeam.name) || 'Чат команды'), text);
 }
 } catch (err) {
 console.error('Не удалось отправить сообщение:', err);
