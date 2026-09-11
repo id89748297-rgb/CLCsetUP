@@ -1,5 +1,7 @@
 // === ЧАТ-ПРИЛОЖЕНИЕ: список команд + чат ===
 
+let chatReplyTo = null; // текущий ответ (реплай): { id, name, text }
+
 function saveTeamsLocal() {
 try { localStorage.setItem('clc_teams', JSON.stringify(teams)); } catch (e) {}
 }
@@ -141,6 +143,8 @@ if (currentChatTeamId === teamId) renderChatMessages(teamId);
 startChatListener(teamId);
 startChatReadsListener(teamId);
 markChatRead(teamId);
+setupChatBubbleSwipes();
+renderChatPinnedBanner();
 setTimeout(() => scrollChatToBottom(), 50);
 }
 
@@ -280,6 +284,7 @@ el.style.overflowY = el.scrollHeight > 98 ? 'auto' : 'hidden';
 function closeTeamChat() {
 currentChatTeamId = null;
 chatEditingMessageId = null;
+chatReplyTo = null;
 __chatKBLast = -1;
 __vvMaxH = 0;
 __kbOpen = false;
@@ -381,21 +386,35 @@ const allRead = otherUids.every(uid => (reads[uid] || 0) >= m.createdAt);
 statusHtml = allRead ? `<span style="color:#42a5f5;font-size:11px;">✔\uFE0E✔\uFE0E</span>` : `<span style="color:#888;font-size:11px;">✔\uFE0E</span>`;
 }
 const pressAttrs = !m.deleted ? `ontouchstart="startChatMsgPress(event,'${teamId}','${m.id}','${m.senderId}')" ontouchend="cancelChatMsgPress()" ontouchcancel="cancelChatMsgPress()" onmousedown="startChatMsgPress(event,'${teamId}','${m.id}','${m.senderId}')" onmouseup="cancelChatMsgPress()" onmouseleave="cancelChatMsgPress()"` : '';
+// Цитата-ответ
+const replyHtml = (m.replyTo && !m.deleted) ? `<div class="chat-msg-reply" onclick="event.stopPropagation(); scrollToChatMessage('${m.replyTo.id}')"><span class="chat-msg-reply-name">↩️ ${escapeHtml(m.replyTo.name || '')}</span><span class="chat-msg-reply-text">${escapeHtml((m.replyTo.text || '').slice(0, 100))}</span></div>` : '';
+// Реакции
+const rMap = m.reactions || {};
+const rKeys = Object.keys(rMap).filter(k => rMap[k] && Object.keys(rMap[k]).length > 0);
+const reactionsHtml = (!m.deleted && rKeys.length) ? `<div class="chat-msg-reactions">${rKeys.map(k => {
+const mine = currentUser && rMap[k][currentUser.uid];
+const cnt = Object.keys(rMap[k]).length;
+return `<span class="chat-msg-reaction${mine ? ' mine' : ''}" onclick="event.stopPropagation(); toggleChatReaction('${teamId}','${m.id}','${k}')">${k}${cnt > 1 ? ' ' + cnt : ''}</span>`;
+}).join('')}</div>` : '';
 let bubbleHtml;
 if (isMe) {
 bubbleHtml = `<div style="display:flex;justify-content:flex-end;">
-<div ${pressAttrs} style="max-width:75%;background:rgba(144,202,249,0.18);border-radius:14px 14px 4px 14px;padding:8px 12px;">
+<div id="chat-msg-${m.id}" class="chat-bubble chat-bubble-me" ${pressAttrs} style="max-width:75%;background:rgba(144,202,249,0.18);border-radius:14px 14px 4px 14px;padding:8px 12px;">
+${replyHtml}
 <div style="font-size:14px;color:#eee;white-space:pre-wrap;word-break:break-word;">${bodyText}${editedTag}</div>
 <div style="display:flex;justify-content:flex-end;align-items:center;gap:4px;margin-top:2px;">${m.starred ? '<span style="font-size:11px;">⭐</span>' : ''}<span style="font-size:11px;color:#888;">${time}</span>${statusHtml}</div>
+${reactionsHtml}
 </div>
 </div>`;
 } else {
 bubbleHtml = `<div style="display:flex;gap:8px;align-items:flex-end;">
 ${avatarHtml}
-<div ${pressAttrs} style="max-width:75%;background:#2a2a2a;border-radius:14px 14px 14px 4px;padding:8px 12px;">
+<div id="chat-msg-${m.id}" class="chat-bubble" ${pressAttrs} style="max-width:75%;background:#2a2a2a;border-radius:14px 14px 14px 4px;padding:8px 12px;">
+${replyHtml}
 <div style="font-size:12px;color:#90caf9;font-weight:bold;">${escapeHtml(name)}${roleLabel ? ` <span style="color:#888;font-weight:normal;">· ${roleLabel}</span>` : ''}</div>
 <div style="font-size:14px;color:#eee;white-space:pre-wrap;word-break:break-word;margin-top:2px;">${bodyText}${editedTag}</div>
 <div style="font-size:11px;color:#888;margin-top:2px;">${m.starred ? '⭐ ' : ''}${time}</div>
+${reactionsHtml}
 </div>
 </div>`;
 }
@@ -418,7 +437,11 @@ if (chatEditingMessageId) {
 await db.collection('teamRegistry').doc(teamId).collection('chat').doc(chatEditingMessageId).update({ text, editedAt: Date.now() });
 chatEditingMessageId = null;
 } else {
-await db.collection('teamRegistry').doc(teamId).collection('chat').add({ text, senderId: currentUser.uid, createdAt: Date.now() });
+const msgData = { text, senderId: currentUser.uid, createdAt: Date.now() };
+if (chatReplyTo) msgData.replyTo = chatReplyTo;
+await db.collection('teamRegistry').doc(teamId).collection('chat').add(msgData);
+chatReplyTo = null;
+renderChatReplyPreview();
 }
 } catch (err) {
 console.error('Не удалось отправить сообщение:', err);
@@ -457,7 +480,12 @@ const roles = teamRolesCache[teamId] || {};
 const otherUids = Object.keys(roles).filter(uid => uid !== senderId);
 const allRead = otherUids.every(uid => (reads[uid] || 0) >= msg.createdAt);
 const options = [];
+options.push(['reply', '↩️ Ответить']);
+options.push(['react', '😀 Реакция']);
 options.push(['star', msg.starred ? '⭐ Убрать из избранного' : '⭐ В избранное']);
+const teamForPin = teams.find(t => t.id === teamId);
+const isPinned = teamForPin && teamForPin.pinnedChatMsg && teamForPin.pinnedChatMsg.id === msgId;
+options.push(isPinned ? ['unpin', '📌 Открепить'] : ['pin', '📌 Закрепить']);
 if (isMine && !allRead) options.push(['edit', '✏️ Изменить']);
 if (isMine || isOwnerOrAdmin) options.push(['delete', '🗑️ Удалить сообщение']);
 if (!isMine && isOwnerOrAdmin) options.push(['deleteAllKick', '⛔ Удалить все сообщения и исключить']);
@@ -479,7 +507,11 @@ el.addEventListener('click', (e) => {
 e.stopPropagation();
 const action = el.dataset.action;
 closeChatMsgMenuPopup();
-if (action === 'star') toggleStarChatMessage(teamId, msgId);
+if (action === 'reply') setChatReplyTo(msg);
+else if (action === 'react') showReactionPicker(teamId, msgId, x, y);
+else if (action === 'star') toggleStarChatMessage(teamId, msgId);
+else if (action === 'pin') pinChatMessage(teamId, msgId);
+else if (action === 'unpin') unpinChatMessage(teamId);
 else if (action === 'edit') startEditChatMessage(msgId);
 else if (action === 'delete') deleteChatMessage(teamId, msgId);
 else if (action === 'deleteAllKick') deleteAllMessagesFromUserAndKick(teamId, senderId);
@@ -632,11 +664,13 @@ team.name = data.name;
 team.avatar = data.avatar || null;
 team.updatedAt = data.updatedAt || team.updatedAt;
 team.createdBy = data.createdBy || team.createdBy;
+team.pinnedChatMsg = data.pinnedChatMsg || null;
 saveTeamsLocal();
 renderTeamsList();
 if (currentChatTeamId === teamId) {
 document.getElementById('chat-team-name').innerText = team.name;
 document.getElementById('chat-team-avatar').innerHTML = team.avatar ? `<img src="${escapeHtml(team.avatar)}" alt="">` : '🎸';
+renderChatPinnedBanner();
 }
 }, err => console.error('teamRegistry listener error:', err));
 }
@@ -707,4 +741,157 @@ startMembershipWatch(teamId);
 startTeamRolesListener(teamId);
 startChatListener(teamId);
 startChatReadsListener(teamId);
+}
+
+// === РЕПЛАИ (ОТВЕТЫ) ===
+function setChatReplyTo(msg) {
+const p = currentMembersProfiles[msg.senderId] || {};
+const name = [p.displayName, p.lastName].filter(Boolean).join(' ').trim() || 'Без имени';
+chatReplyTo = { id: msg.id, name, text: (msg.text || '').slice(0, 120) };
+renderChatReplyPreview();
+document.getElementById('chat-input').focus();
+}
+function clearChatReplyTo() {
+chatReplyTo = null;
+renderChatReplyPreview();
+}
+function renderChatReplyPreview() {
+const el = document.getElementById('chat-reply-preview');
+if (!el) return;
+if (!chatReplyTo) { el.style.display = 'none'; el.innerHTML = ''; return; }
+el.style.display = 'flex';
+el.innerHTML = `<div style="min-width:0;flex:1;border-left:3px solid #42a5f5;padding-left:8px;"><div style="font-size:12px;color:#42a5f5;font-weight:bold;">↩️ ${escapeHtml(chatReplyTo.name)}</div><div style="font-size:13px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(chatReplyTo.text)}</div></div><button class="btn-icon" onclick="event.stopPropagation(); clearChatReplyTo()">✕</button>`;
+}
+
+// === СВАЙПЫ ПО СООБЩЕНИЯМ (вправо — ответить, влево по своим — изменить) ===
+function setupChatBubbleSwipes() {
+if (window.__chatBubbleSwipesBound) return;
+window.__chatBubbleSwipesBound = true;
+const list = document.getElementById('chat-messages-list');
+if (!list) return;
+let bubble = null, sx = 0, sy = 0, dx = 0, mode = 0; // mode: 0 неизвестно, 1 горизонталь, 2 вертикаль
+list.addEventListener('touchstart', (e) => {
+const t = e.touches[0];
+bubble = e.target.closest('.chat-bubble');
+sx = t.clientX; sy = t.clientY; dx = 0; mode = 0;
+if (bubble) bubble.style.transition = 'none';
+}, { passive: true });
+list.addEventListener('touchmove', (e) => {
+if (!bubble) return;
+const t = e.touches[0];
+const mdx = t.clientX - sx, mdy = t.clientY - sy;
+if (mode === 0 && (Math.abs(mdx) > 12 || Math.abs(mdy) > 12)) {
+mode = Math.abs(mdx) > Math.abs(mdy) ? 1 : 2;
+// горизонтальное движение отменяет долгое нажатие
+if (mode === 1) { clearTimeout(window.__chatPressTimer); window.__chatPressFired = true; }
+}
+if (mode !== 1) return;
+const allowLeft = bubble.classList.contains('chat-bubble-me');
+dx = Math.max(-100, Math.min(140, mdx));
+if (dx < 0 && !allowLeft) dx = 0;
+bubble.style.transform = dx > 0
+? `translateX(${Math.min(dx, 90) * 0.6}px)`
+: `translateX(${Math.max(dx, -70) * 0.4}px)`;
+}, { passive: true });
+list.addEventListener('touchend', () => {
+if (!bubble) return;
+const b = bubble; bubble = null;
+b.style.transition = 'transform 0.15s ease';
+b.style.transform = '';
+if (mode !== 1) return;
+const teamId = currentChatTeamId;
+const msgId = (b.id || '').replace('chat-msg-', '');
+const msg = (chatMessagesCache[teamId] || []).find(m => m.id === msgId);
+if (!msg || msg.deleted) return;
+if (dx > 60) { if (navigator.vibrate) navigator.vibrate(20); setChatReplyTo(msg); }
+else if (dx < -45) { if (navigator.vibrate) navigator.vibrate(20); startEditChatMessage(msgId); }
+}, { passive: true });
+// Двойной тап мышью (компьютер) — сердечко
+list.addEventListener('dblclick', (e) => {
+const b = e.target.closest('.chat-bubble');
+if (!b) return;
+const msgId = (b.id || '').replace('chat-msg-', '');
+toggleChatReaction(currentChatTeamId, msgId, '❤️');
+});
+}
+
+// === РЕАКЦИИ ===
+async function toggleChatReaction(teamId, msgId, emoji) {
+if (!db || !currentUser || !teamId || !msgId) return;
+const msg = (chatMessagesCache[teamId] || []).find(m => m.id === msgId);
+if (!msg || msg.deleted) return;
+const mine = msg.reactions && msg.reactions[emoji] && msg.reactions[emoji][currentUser.uid];
+try {
+if (mine) {
+await db.collection('teamRegistry').doc(teamId).collection('chat').doc(msgId)
+.update({ [`reactions.${emoji}.${currentUser.uid}`]: firebase.firestore.FieldValue.delete() });
+} else {
+await db.collection('teamRegistry').doc(teamId).collection('chat').doc(msgId)
+.update({ [`reactions.${emoji}.${currentUser.uid}`]: true });
+}
+} catch (err) { console.error('reaction failed:', err); }
+}
+function showReactionPicker(teamId, msgId, x, y) {
+closeChatMsgMenuPopup();
+const overlay = document.createElement('div');
+overlay.id = 'chat-msg-menu-overlay';
+overlay.style.cssText = 'position:fixed;inset:0;z-index:9998;background:transparent;';
+overlay.onclick = closeChatMsgMenuPopup;
+document.body.appendChild(overlay);
+const menu = document.createElement('div');
+menu.id = 'chat-msg-menu-popup';
+menu.style.cssText = 'position:fixed;background:#2a2a2a;border-radius:22px;box-shadow:0 4px 14px rgba(0,0,0,0.5);z-index:9999;display:flex;gap:2px;padding:6px;';
+['❤️','👍','😂','😢','🙏','🔥'].forEach(em => {
+const s = document.createElement('span');
+s.textContent = em;
+s.style.cssText = 'font-size:24px;padding:6px 8px;cursor:pointer;border-radius:50%;';
+s.onclick = (e) => { e.stopPropagation(); closeChatMsgMenuPopup(); toggleChatReaction(teamId, msgId, em); };
+menu.appendChild(s);
+});
+document.body.appendChild(menu);
+menu.style.left = Math.min(Math.max(8, x - 110), window.innerWidth - 250) + 'px';
+menu.style.top = Math.min(y, window.innerHeight - 60) + 'px';
+}
+
+// === ЗАКРЕПЛЁННОЕ СООБЩЕНИЕ ===
+async function pinChatMessage(teamId, msgId) {
+const msg = (chatMessagesCache[teamId] || []).find(m => m.id === msgId);
+if (!db || !msg || msg.deleted) return;
+const p = currentMembersProfiles[msg.senderId] || {};
+const name = [p.displayName, p.lastName].filter(Boolean).join(' ').trim() || 'Без имени';
+try {
+await db.collection('teamRegistry').doc(teamId).update({
+pinnedChatMsg: { id: msg.id, name, text: (msg.text || '').slice(0, 140), senderId: msg.senderId, createdAt: msg.createdAt }
+});
+showToast('📌 Сообщение закреплено', 'success');
+} catch (err) {
+console.error('pin failed:', err);
+showToast('❌ Не удалось закрепить сообщение', 'error');
+}
+}
+async function unpinChatMessage(teamId) {
+if (!db || !teamId) return;
+try {
+await db.collection('teamRegistry').doc(teamId).update({ pinnedChatMsg: firebase.firestore.FieldValue.delete() });
+} catch (err) {
+console.error('unpin failed:', err);
+showToast('❌ Не удалось открепить сообщение', 'error');
+}
+}
+function renderChatPinnedBanner() {
+const banner = document.getElementById('chat-pinned-banner');
+if (!banner) return;
+const team = teams.find(t => t.id === currentChatTeamId);
+const pin = team && team.pinnedChatMsg;
+if (!pin) { banner.style.display = 'none'; banner.innerHTML = ''; return; }
+banner.style.display = 'flex';
+banner.innerHTML = `<div style="min-width:0;flex:1;border-left:3px solid #42a5f5;padding-left:8px;" onclick="scrollToChatMessage('${pin.id}')"><div style="font-size:12px;color:#42a5f5;font-weight:bold;">📌 ${escapeHtml(pin.name)}</div><div style="font-size:13px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(pin.text)}</div></div><button class="btn-icon" onclick="event.stopPropagation(); unpinChatMessage('${currentChatTeamId}')" title="Открепить">✕</button>`;
+}
+function scrollToChatMessage(msgId) {
+const el = document.getElementById('chat-msg-' + msgId);
+if (!el) { showToast('Сообщение выше загруженной истории — прокрутите вверх и повторите', 'info'); return; }
+el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+el.style.transition = 'background 1.2s';
+el.style.background = 'rgba(66,165,245,0.25)';
+setTimeout(() => { el.style.background = ''; }, 1200);
 }

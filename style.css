@@ -656,3 +656,18 @@ html, body { overscroll-behavior: none; }
 #chat-messages-list { overscroll-behavior: contain; }
 .btn-main, .btn-secondary, .btn-pastel, .btn-danger, .btn-danger-confirm, .btn-cancel-confirm, .btn-back, .btn-edit-sl, .btn-add-song-top, .btn-archive-sl, .btn-share-sl, .grid-btn, .tab, .inline-save-btn, .inline-cancel-btn, .btn-save-all, .btn-accent-save { font-weight: normal !important; }
 .song-link { display: inline-block !important; text-align: center !important; }
+
+/* === ЧАТ: реплаи, реакции, закреп (Пачка 1) === */
+.chat-bubble { touch-action: pan-y; }
+.chat-msg-reply { border-left: 3px solid #42a5f5; padding: 3px 8px; margin-bottom: 5px; border-radius: 6px; background: rgba(66,165,245,0.10); cursor: pointer; }
+.chat-msg-reply-name { display: block; font-size: 12px; color: #42a5f5; font-weight: bold; }
+.chat-msg-reply-text { display: block; font-size: 12px; color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.chat-msg-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.chat-msg-reaction { background: rgba(255,255,255,0.10); border-radius: 12px; padding: 2px 9px; font-size: 13px; cursor: pointer; color: #eee; }
+.chat-msg-reaction.mine { background: rgba(66,165,245,0.40); }
+body.light .chat-msg-reaction { background: rgba(0,0,0,0.08); color: #333; }
+body.light .chat-msg-reaction.mine { background: rgba(66,165,245,0.45); }
+body.light .chat-msg-reply { background: rgba(13,71,161,0.08); }
+body.light .chat-msg-reply-text { color: #777; }
+#chat-pinned-banner { user-select: none; }
+#chat-reply-preview { background: rgba(255,255,255,0.05) !important; }
