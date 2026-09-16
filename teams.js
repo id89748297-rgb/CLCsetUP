@@ -114,6 +114,10 @@ document.getElementById('chat-team-name').innerText = team.name;
 document.getElementById('chat-team-avatar').innerHTML = team.avatar ? `<img src="${escapeHtml(team.avatar)}" alt="">` : '🎸';
 document.getElementById('chat-input').value = '';
 showPage('page-team-chat');
+// Автофокус поля ввода при открытии чата (клавиатура всплывает как в Telegram).
+// focus() должен вызываться синхронно в цепочке пользовательского касания,
+// иначе мобильные браузеры не покажут клавиатуру.
+try { document.getElementById('chat-input').focus({ preventScroll: true }); } catch (e) {}
 setupChatKeyboardHandling();
 setupChatFixedAreasTouchBlock();
 setupChatTouchGuard();
@@ -379,7 +383,7 @@ const roleObj = roles[m.senderId];
 const roleLabel = roleObj && roleObj.role === 'owner' ? 'Владелец' : (roleObj && roleObj.role === 'admin' ? 'Админ' : '');
 const avatarHtml = p.avatar ? `<img src="${escapeHtml(p.avatar)}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;">` : `<div style="width:32px;height:32px;border-radius:50%;background:#444;display:flex;align-items:center;justify-content:center;">👤</div>`;
 const time = new Date(m.createdAt).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
-const bodyText = m.deleted ? '<i style="opacity:0.6;">Сообщение удалено</i>' : escapeHtml(m.text || '');
+const bodyText = m.deleted ? '<i style="opacity:0.6;">Сообщение удалено</i>' : formatChatText(m.text || '');
 const editedTag = (!m.deleted && m.editedAt) ? ' <span style="opacity:0.6;font-size:11px;">(изменено)</span>' : '';
 const otherUids = Object.keys(roles).filter(uid => uid !== m.senderId);
 let statusHtml = '';
@@ -389,7 +393,7 @@ statusHtml = allRead ? `<span style="color:#42a5f5;font-size:11px;">✔\uFE0E✔
 }
 const pressAttrs = !m.deleted ? `ontouchstart="startChatMsgPress(event,'${teamId}','${m.id}','${m.senderId}')" ontouchend="cancelChatMsgPress()" ontouchcancel="cancelChatMsgPress()" onmousedown="startChatMsgPress(event,'${teamId}','${m.id}','${m.senderId}')" onmouseup="cancelChatMsgPress()" onmouseleave="cancelChatMsgPress()"` : '';
 // Цитата-ответ
-const replyHtml = (m.replyTo && !m.deleted) ? `<div class="chat-msg-reply" onclick="event.stopPropagation(); scrollToChatMessage('${m.replyTo.id}')"><span class="chat-msg-reply-name">↩️ ${escapeHtml(m.replyTo.name || '')}</span><span class="chat-msg-reply-text">${escapeHtml((m.replyTo.text || '').slice(0, 100))}</span></div>` : '';
+const replyHtml = (m.replyTo && !m.deleted) ? `<div class="chat-msg-reply" onclick="event.stopPropagation(); scrollToChatMessage('${m.replyTo.id}')"><span class="chat-msg-reply-name">↩️ ${escapeHtml(m.replyTo.name || '')}</span><span class="chat-msg-reply-text">${formatChatText((m.replyTo.text || '').slice(0, 100))}</span></div>` : '';
 // Реакции
 const rMap = m.reactions || {};
 const rKeys = Object.keys(rMap).filter(k => rMap[k] && Object.keys(rMap[k]).length > 0);
@@ -428,8 +432,155 @@ const hl = list.querySelector('#chat-msg-' + window.__highlightMsgId);
 if (hl) hl.style.background = 'rgba(66,165,245,0.25)';
 }
 }
-function handleChatInputKeydown(e) {
+// === ФОРМАТИРОВАНИЕ ТЕКСТА (жирный / курсив / зачёркнутый / код) ===
+// Как в Telegram: **жирный**, *курсив*, ~~зачёркнутый~~, `код`, @упоминание
+function formatChatText(text) {
+let s = escapeHtml(text || '');
+s = s.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+s = s.replace(/\*([^*\n]+)\*/g, '<i>$1</i>');
+s = s.replace(/~~([^~\n]+)~~/g, '<s>$1</s>');
+s = s.replace(/`([^`\n]+)`/g, '<code style="background:rgba(255,255,255,0.12);border-radius:4px;padding:1px 5px;font-family:monospace;font-size:13px;">$1</code>');
+s = s.replace(/@([\wа-яёА-ЯЁ][\wа-яёА-ЯЁ.-]*)/g, (m) => `<span class="chat-mention" onclick="event.stopPropagation(); openMentionProfileByName('${m.slice(1).replace(/'/g, "\\'")}')">${m}</span>`);
+return s;
 }
+// Клик по @упоминанию — открыть профиль участника
+function openMentionProfileByName(name) {
+const clean = (name || '').replace(/_/g, ' ').toLowerCase().trim();
+if (!clean) return;
+const uid = Object.keys(currentMembersProfiles).find(uid => {
+const p = currentMembersProfiles[uid] || {};
+const full = [p.displayName, p.lastName].filter(Boolean).join(' ').trim().toLowerCase();
+return full === clean || (p.displayName || '').toLowerCase() === clean;
+});
+if (uid && typeof openMemberProfile === 'function') openMemberProfile(uid);
+}
+// Обернуть выделение в textarea маркерами форматирования (кнопки B / I / S / код)
+function wrapChatSelection(marker) {
+const input = document.getElementById('chat-input');
+if (!input) return;
+const start = input.selectionStart, end = input.selectionEnd;
+const before = input.value.slice(0, start);
+const sel = input.value.slice(start, end);
+const after = input.value.slice(end);
+const alreadyOpen = before.endsWith(marker) && after.startsWith(marker);
+let newValue, newCaret;
+if (alreadyOpen) {
+newValue = before.slice(0, -marker.length) + sel + after.slice(marker.length);
+newCaret = start - marker.length + sel.length;
+} else if (sel) {
+newValue = before + marker + sel + marker + after;
+newCaret = end + marker.length;
+} else {
+newValue = before + marker + marker + after;
+newCaret = start + marker.length;
+}
+input.value = newValue;
+input.focus();
+input.setSelectionRange(newCaret, newCaret);
+autoGrowChatInput(input);
+handleChatInputChange(input);
+}
+
+// === УПОМИНАНИЯ @: извлечение uid из текста ===
+function extractMentionUids(text) {
+const uids = new Set();
+const re = /@([\wа-яёА-ЯЁ][\wа-яёА-ЯЁ.-]*)/g;
+let m;
+while ((m = re.exec(text || ''))) {
+const clean = m[1].replace(/_/g, ' ').toLowerCase();
+Object.keys(currentMembersProfiles).forEach(uid => {
+const p = currentMembersProfiles[uid] || {};
+const full = [p.displayName, p.lastName].filter(Boolean).join(' ').trim().toLowerCase();
+if (full === clean || (p.displayName || '').toLowerCase() === clean) uids.add(uid);
+});
+}
+return [...uids];
+}
+
+// === АВТОКОМПЛИТ @УПОМИНАНИЙ ===
+let __mentionState = null; // { token, start, items, active }
+function handleChatInputChange(input) {
+const caret = input.selectionStart;
+const upToCaret = input.value.slice(0, caret);
+const m = upToCaret.match(/(^|\s)@([\wа-яёА-ЯЁ.-]*)$/);
+if (!m) { closeMentionPopup(); return; }
+const token = m[2].toLowerCase();
+const roles = teamRolesCache[currentChatTeamId] || {};
+const items = Object.keys(roles).map(uid => {
+const p = currentMembersProfiles[uid] || {};
+const name = [p.displayName, p.lastName].filter(Boolean).join(' ').trim();
+if (!name) return null;
+if (token && !name.toLowerCase().includes(token)) return null;
+return { uid, name, avatar: p.avatar, role: roles[uid] ? roles[uid].role : 'member' };
+}).filter(Boolean).slice(0, 5);
+if (!items.length) { closeMentionPopup(); return; }
+__mentionState = { token: m[2], start: caret - m[2].length - 1, items, active: 0 };
+showMentionPopup(items);
+}
+function showMentionPopup(items) {
+let popup = document.getElementById('chat-mention-popup');
+if (!popup) {
+popup = document.createElement('div');
+popup.id = 'chat-mention-popup';
+document.body.appendChild(popup);
+}
+popup.innerHTML = items.map((it, i) => {
+const avatar = it.avatar
+? `<img src="${escapeHtml(it.avatar)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;">`
+: `<div style="width:28px;height:28px;border-radius:50%;background:#444;display:flex;align-items:center;justify-content:center;font-size:14px;">👤</div>`;
+const roleLabel = it.role === 'owner' ? ' · Владелец' : (it.role === 'admin' ? ' · Админ' : '');
+return `<div class="chat-mention-item${i === __mentionState.active ? ' active' : ''}" data-uid="${it.uid}">${avatar}<div style="min-width:0;"><div style="font-size:14px;color:#eee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(it.name)}</div><div style="font-size:11px;color:#888;">@${escapeHtml(it.name.split(' ')[0])}${roleLabel}</div></div></div>`;
+}).join('');
+popup.querySelectorAll('.chat-mention-item').forEach((el, i) => {
+el.addEventListener('mousedown', (e) => { e.preventDefault(); pickMention(i); });
+});
+const inputBar = document.getElementById('chat-input-bar');
+const rect = inputBar ? inputBar.getBoundingClientRect() : { top: window.innerHeight - 60, left: 10, width: window.innerWidth - 20 };
+popup.style.display = 'block';
+popup.style.left = Math.max(8, rect.left) + 'px';
+popup.style.width = Math.min(300, rect.width - 16) + 'px';
+popup.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+}
+function closeMentionPopup() {
+__mentionState = null;
+const popup = document.getElementById('chat-mention-popup');
+if (popup) popup.remove();
+}
+// onBlur инпута: не закрывать попап, если по нему кликают в этот момент
+function closeMentionPopupIfIdle() {
+const popup = document.getElementById('chat-mention-popup');
+if (popup && popup.matches(':hover')) return;
+closeMentionPopup();
+}
+function pickMention(i) {
+if (!__mentionState) return;
+const it = __mentionState.items[i];
+const input = document.getElementById('chat-input');
+const insert = '@' + it.name.replace(/\s+/g, '_');
+input.value = input.value.slice(0, __mentionState.start) + insert + ' ' + input.value.slice(input.selectionStart);
+const caret = __mentionState.start + insert.length + 1;
+input.focus();
+input.setSelectionRange(caret, caret);
+closeMentionPopup();
+autoGrowChatInput(input);
+}
+
+function isTouchChatDevice() { return ('ontouchstart' in window) || navigator.maxTouchPoints > 0; }
+function handleChatInputKeydown(e) {
+// навигация по автокомплиту упоминаний
+if (__mentionState && popupOpen()) {
+if (e.key === 'ArrowDown') { e.preventDefault(); __mentionState.active = (__mentionState.active + 1) % __mentionState.items.length; showMentionPopup(__mentionState.items); return; }
+if (e.key === 'ArrowUp') { e.preventDefault(); __mentionState.active = (__mentionState.active - 1 + __mentionState.items.length) % __mentionState.items.length; showMentionPopup(__mentionState.items); return; }
+if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickMention(__mentionState.active); return; }
+if (e.key === 'Escape') { e.preventDefault(); closeMentionPopup(); return; }
+}
+// Enter — отправить (только на компьютере; на телефоне Enter = перенос строки)
+if (e.key === 'Enter' && !e.shiftKey && !isTouchChatDevice()) {
+e.preventDefault();
+sendOrEditChatMessage();
+}
+}
+function popupOpen() { return !!document.getElementById('chat-mention-popup'); }
 
 // === ОТПРАВКА / РЕДАКТИРОВАНИЕ ===
 async function sendOrEditChatMessage() {
@@ -446,6 +597,8 @@ chatEditingMessageId = null;
 } else {
 const msgData = { text, senderId: currentUser.uid, createdAt: Date.now() };
 if (chatReplyTo) msgData.replyTo = chatReplyTo;
+const mentionUids = extractMentionUids(text);
+if (mentionUids.length) msgData.mentions = mentionUids;
 await db.collection('teamRegistry').doc(teamId).collection('chat').add(msgData);
 chatReplyTo = null;
 renderChatReplyPreview();
@@ -798,9 +951,10 @@ mode = Math.abs(mdx) > Math.abs(mdy) ? 1 : 2;
 if (mode === 1) { clearTimeout(window.__chatPressTimer); window.__chatPressFired = true; }
 }
 if (mode !== 1) return;
-// свайп только вправо — «ответить» (редактирование — через удержание)
-dx = Math.min(140, Math.max(0, mdx));
-bubble.style.transform = `translateX(${Math.min(dx, 90) * 0.6}px)`;
+// вправо — «ответить», влево по своему сообщению — «изменить»
+dx = Math.min(140, Math.max(-140, mdx));
+const dxClamped = dx > 0 ? Math.min(dx, 90) * 0.6 : Math.max(dx, -90) * 0.6;
+bubble.style.transform = `translateX(${dxClamped}px)`;
 }, { passive: true });
 list.addEventListener('touchend', (e) => {
 if (!bubble) return;
@@ -828,6 +982,10 @@ const msgId = (b.id || '').replace('chat-msg-', '');
 const msg = (chatMessagesCache[teamId] || []).find(m => m.id === msgId);
 if (!msg || msg.deleted) return;
 if (dx > 60) { if (navigator.vibrate) navigator.vibrate(20); setChatReplyTo(msg); }
+else if (dx < -60 && msg.senderId === currentUser.uid && Date.now() - msg.createdAt < CHAT_EDIT_WINDOW_MS) {
+if (navigator.vibrate) navigator.vibrate(20);
+startEditChatMessage(msg.id);
+}
 }, { passive: true });
 // Двойной тап мышью (компьютер) — сердечко
 list.addEventListener('dblclick', (e) => {
@@ -908,7 +1066,7 @@ const team = teams.find(t => t.id === currentChatTeamId);
 const pin = team && team.pinnedChatMsg;
 if (!pin) { banner.style.display = 'none'; banner.innerHTML = ''; return; }
 banner.style.display = 'flex';
-banner.innerHTML = `<div style="min-width:0;flex:1;border-left:3px solid #42a5f5;padding-left:8px;" onclick="scrollToChatMessage('${pin.id}')"><div style="font-size:12px;color:#42a5f5;font-weight:bold;">📌 ${escapeHtml(pin.name)}</div><div style="font-size:13px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(pin.text)}</div></div><button class="btn-icon" onclick="event.stopPropagation(); unpinChatMessage('${currentChatTeamId}')" title="Открепить">✕</button>`;
+banner.innerHTML = `<div style="min-width:0;flex:1;border-left:3px solid #42a5f5;padding-left:8px;" onclick="scrollToChatMessage('${pin.id}')"><div style="font-size:12px;color:#42a5f5;font-weight:bold;">📌 ${escapeHtml(pin.name)}</div><div style="font-size:13px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${formatChatText(pin.text)}</div></div><button class="btn-icon" onclick="event.stopPropagation(); unpinChatMessage('${currentChatTeamId}')" title="Открепить">✕</button>`;
 }
 function scrollToChatMessage(msgId) {
 const el = document.getElementById('chat-msg-' + msgId);
