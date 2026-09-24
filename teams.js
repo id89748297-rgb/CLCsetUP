@@ -304,6 +304,50 @@ function scrollChatToBottom() {
 const list = document.getElementById('chat-messages-list');
 if (list) list.scrollTop = list.scrollHeight;
 }
+// Эффективное время сообщения: serverTimestamp на мгновение даёт null в снапшоте,
+// тогда используем клиентское время, записанное при отправке
+function msgTs(m) { return m.createdAt || m.clientCreatedAt || 0; }
+// Повтор отправки зависшего сообщения (клик по ⚠)
+async function retryChatMessage(teamId, tempId) {
+const msgs = chatMessagesCache[teamId] || [];
+const m = msgs.find(x => x.id === tempId);
+if (!m || !m.__failed || !db || !currentUser) return;
+m.__failed = false; m.__pending = true;
+renderChatMessages(teamId);
+try {
+await db.collection('teamRegistry').doc(teamId).collection('chat').add({
+text: m.text, senderId: currentUser.uid,
+createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+clientCreatedAt: Date.now(),
+...(m.replyTo ? { replyTo: m.replyTo } : {}),
+...(m.mentions && m.mentions.length ? { mentions: m.mentions } : {})
+});
+} catch (err) {
+console.error('Повторная отправка не удалась:', err);
+if (chatMessagesCache[teamId]) {
+const still = chatMessagesCache[teamId].find(x => x.id === tempId);
+if (still) still.__failed = true;
+renderChatMessages(teamId);
+}
+}
+}
+// Кнопка «вниз»: обновить видимость и бейдж непрочитанных
+function updateChatScrollDownBtn() {
+const teamId = currentChatTeamId;
+const btn = document.getElementById('chat-scroll-down');
+const list = document.getElementById('chat-messages-list');
+if (!btn || !list || !teamId) return;
+const farFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight > 300;
+btn.style.display = farFromBottom ? 'flex' : 'none';
+const badge = document.getElementById('chat-scroll-down-badge');
+if (!farFromBottom || !currentUser) { if (badge) badge.style.display = 'none'; return; }
+const unseen = (chatMessagesCache[teamId] || []).filter(m => !m.__pending && !m.__failed && m.senderId !== currentUser.uid && msgTs(m) > (window.__chatSeenTs || 0)).length;
+if (badge) { badge.textContent = unseen > 0 ? (unseen > 99 ? '99+' : String(unseen)) : ''; badge.style.display = unseen > 0 ? 'flex' : 'none'; }
+}
+function chatScrollDownClick() {
+const list = document.getElementById('chat-messages-list');
+if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
+}
 
 // === ЛИСТЕНЕРЫ ЧАТА ===
 function startChatListener(teamId) {
@@ -311,10 +355,20 @@ if (chatListenerUnsubs[teamId] || !db || !currentUser) return;
 chatListenerUnsubs[teamId] = db.collection('teamRegistry').doc(teamId).collection('chat')
 .orderBy('createdAt', 'desc').limit(50)
 .onSnapshot(snap => {
-const msgs = [];
-snap.forEach(doc => msgs.push({ id: doc.id, ...doc.data() }));
-msgs.reverse();
-chatMessagesCache[teamId] = msgs;
+const fresh = [];
+snap.forEach(doc => fresh.push({ id: doc.id, ...doc.data() }));
+fresh.reverse();
+const freshIds = new Set(fresh.map(m => m.id));
+// Не сбрасываем догруженную историю: старше самой старой из «свежих» оставляем в кэше
+const oldestFreshTs = fresh.length ? msgTs(fresh[0]) : Infinity;
+const prev = chatMessagesCache[teamId] || [];
+// Темповое сообщение убираем, когда реальное дошло от сервера (тот же отправитель и текст)
+const tempMatches = t => fresh.some(m => m.senderId === t.senderId && m.text === t.text && !m.deleted);
+const kept = prev.filter(m =>
+((m.__pending || m.__failed) && !tempMatches(m)) ||
+(!(m.__pending || m.__failed) && !freshIds.has(m.id) && msgTs(m) < oldestFreshTs)
+);
+chatMessagesCache[teamId] = kept.concat(fresh).sort((a, b) => msgTs(a) - msgTs(b));
 if (currentChatTeamId === teamId) {
 const list = document.getElementById('chat-messages-list');
 const wasAtBottom = list ? (list.scrollHeight - list.scrollTop - list.clientHeight < 60) : true;
@@ -343,12 +397,12 @@ if (!currentUser) return 0;
 const msgs = chatMessagesCache[teamId] || [];
 const reads = chatReadsCache[teamId] || {};
 const myLastRead = reads[currentUser.uid] || 0;
-return msgs.filter(m => !m.deleted && m.senderId !== currentUser.uid && m.createdAt > myLastRead).length;
+return msgs.filter(m => !m.deleted && !m.__pending && !m.__failed && m.senderId !== currentUser.uid && msgTs(m) > myLastRead).length;
 }
 function markChatRead(teamId) {
 if (!db || !currentUser) return;
 db.collection('teamRegistry').doc(teamId).collection('chatReads').doc(currentUser.uid)
-.set({ lastReadAt: Date.now() }, { merge: true }).catch(err => console.error('mark chat read failed:', err));
+.set({ lastReadAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(err => console.error('mark chat read failed:', err));
 }
 
 // === РЕНДЕР СООБЩЕНИЙ ===
@@ -371,10 +425,10 @@ const reads = chatReadsCache[teamId] || {};
 let lastDayKey = null;
 list.innerHTML = msgs.map(m => {
 let dateDivider = '';
-const dayKey = new Date(m.createdAt).toDateString();
+const dayKey = new Date(msgTs(m)).toDateString();
 if (dayKey !== lastDayKey) {
 lastDayKey = dayKey;
-dateDivider = `<div style="text-align:center;margin:8px 0;"><span style="background:rgba(255,255,255,0.08);color:#888;font-size:12px;padding:4px 12px;border-radius:12px;">${formatChatDateLabel(m.createdAt)}</span></div>`;
+dateDivider = `<div style="text-align:center;margin:8px 0;"><span style="background:rgba(255,255,255,0.08);color:#888;font-size:12px;padding:4px 12px;border-radius:12px;">${formatChatDateLabel(msgTs(m))}</span></div>`;
 }
 const isMe = m.senderId === currentUser.uid;
 const p = currentMembersProfiles[m.senderId] || {};
@@ -382,14 +436,20 @@ const name = [p.displayName, p.lastName].filter(Boolean).join(' ').trim() || 'Б
 const roleObj = roles[m.senderId];
 const roleLabel = roleObj && roleObj.role === 'owner' ? 'Владелец' : (roleObj && roleObj.role === 'admin' ? 'Админ' : '');
 const avatarHtml = p.avatar ? `<img src="${escapeHtml(p.avatar)}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;">` : `<div style="width:32px;height:32px;border-radius:50%;background:#444;display:flex;align-items:center;justify-content:center;">👤</div>`;
-const time = new Date(m.createdAt).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
+const time = new Date(msgTs(m)).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
 const bodyText = m.deleted ? '<i style="opacity:0.6;">Сообщение удалено</i>' : formatChatText(m.text || '');
 const editedTag = (!m.deleted && m.editedAt) ? ' <span style="opacity:0.6;font-size:11px;">(изменено)</span>' : '';
 const otherUids = Object.keys(roles).filter(uid => uid !== m.senderId);
 let statusHtml = '';
 if (isMe && !m.deleted) {
-const allRead = otherUids.every(uid => (reads[uid] || 0) >= m.createdAt);
+if (m.__pending) {
+statusHtml = `<span style="color:#888;font-size:11px;">🕘</span>`;
+} else if (m.__failed) {
+statusHtml = `<span style="color:#ef5350;font-size:13px;cursor:pointer;padding:2px;" title="Не отправлено — нажмите для повтора" onclick="event.stopPropagation(); retryChatMessage('${teamId}','${m.id}')">⚠</span>`;
+} else {
+const allRead = otherUids.every(uid => (reads[uid] || 0) >= msgTs(m));
 statusHtml = allRead ? `<span style="color:#42a5f5;font-size:11px;">✔\uFE0E✔\uFE0E</span>` : `<span style="color:#888;font-size:11px;">✔\uFE0E</span>`;
+}
 }
 const pressAttrs = !m.deleted ? `ontouchstart="startChatMsgPress(event,'${teamId}','${m.id}','${m.senderId}')" ontouchend="cancelChatMsgPress()" ontouchcancel="cancelChatMsgPress()" onmousedown="startChatMsgPress(event,'${teamId}','${m.id}','${m.senderId}')" onmouseup="cancelChatMsgPress()" onmouseleave="cancelChatMsgPress()"` : '';
 // Цитата-ответ
@@ -405,7 +465,7 @@ return `<span class="chat-msg-reaction${mine ? ' mine' : ''}" onclick="event.sto
 let bubbleHtml;
 if (isMe) {
 bubbleHtml = `<div style="display:flex;justify-content:flex-end;">
-<div id="chat-msg-${m.id}" class="chat-bubble chat-bubble-me" ${pressAttrs} style="max-width:75%;background:rgba(144,202,249,0.18);border-radius:14px 14px 4px 14px;padding:8px 12px;">
+<div id="chat-msg-${m.id}" class="chat-bubble chat-bubble-me" ${pressAttrs} style="max-width:75%;background:rgba(144,202,249,0.18);border-radius:14px 14px 4px 14px;padding:8px 12px;${m.__pending ? 'opacity:0.6;' : ''}${m.__failed ? 'border:1px solid #ef5350;' : ''}">
 ${replyHtml}
 <div style="font-size:14px;color:#eee;white-space:pre-wrap;word-break:break-word;">${bodyText}${editedTag}</div>
 <div style="display:flex;justify-content:flex-end;align-items:center;gap:4px;margin-top:2px;">${m.starred ? '<span style="font-size:11px;">⭐</span>' : ''}<span style="font-size:11px;color:#888;">${time}</span>${statusHtml}</div>
@@ -431,6 +491,7 @@ if (window.__highlightMsgId) {
 const hl = list.querySelector('#chat-msg-' + window.__highlightMsgId);
 if (hl) hl.style.background = 'rgba(66,165,245,0.25)';
 }
+updateChatScrollDownBtn();
 }
 // === ФОРМАТИРОВАНИЕ ТЕКСТА (жирный / курсив / зачёркнутый / код) ===
 // Как в Telegram: **жирный**, *курсив*, ~~зачёркнутый~~, `код`, @упоминание
@@ -590,16 +651,35 @@ const input = document.getElementById('chat-input');
 const text = input.value.trim();
 if (!text) return;
 input.value = '';
+autoGrowChatInput(input);
 try {
 if (chatEditingMessageId) {
 await db.collection('teamRegistry').doc(teamId).collection('chat').doc(chatEditingMessageId).update({ text, editedAt: Date.now() });
 chatEditingMessageId = null;
 } else {
-const msgData = { text, senderId: currentUser.uid, createdAt: Date.now() };
-if (chatReplyTo) msgData.replyTo = chatReplyTo;
+// Оптимистичный показ: сообщение видно сразу, до ответа сервера
+const tempId = 'temp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+const localMsg = { id: tempId, text, senderId: currentUser.uid, createdAt: Date.now(), clientCreatedAt: Date.now(), __pending: true };
+if (chatReplyTo) localMsg.replyTo = chatReplyTo;
 const mentionUids = extractMentionUids(text);
+if (mentionUids.length) localMsg.mentions = mentionUids;
+if (!chatMessagesCache[teamId]) chatMessagesCache[teamId] = [];
+chatMessagesCache[teamId].push(localMsg);
+renderChatMessages(teamId);
+scrollChatToBottom();
+const msgData = { text, senderId: currentUser.uid, createdAt: firebase.firestore.FieldValue.serverTimestamp(), clientCreatedAt: Date.now() };
+if (chatReplyTo) msgData.replyTo = chatReplyTo;
 if (mentionUids.length) msgData.mentions = mentionUids;
+try {
 await db.collection('teamRegistry').doc(teamId).collection('chat').add(msgData);
+} catch (sendErr) {
+// Сервер не принял: помечаем ⚠ — клик по значку повторит отправку
+console.error('Не удалось отправить сообщение:', sendErr);
+const still = (chatMessagesCache[teamId] || []).find(m => m.id === tempId);
+if (still) { still.__pending = false; still.__failed = true; renderChatMessages(teamId); }
+showToast('⚠ Сообщение не отправлено — нажмите ⚠ для повтора', 'error');
+return;
+}
 chatReplyTo = null;
 renderChatReplyPreview();
 // push-уведомление всем участникам, кроме себя
@@ -607,7 +687,7 @@ const pushTeam = teams.find(t => t.id === teamId);
 sendPushToTeam(teamId, '💬 ' + ((pushTeam && pushTeam.name) || 'Чат команды'), text);
 }
 } catch (err) {
-console.error('Не удалось отправить сообщение:', err);
+console.error('Ошибка отправки:', err);
 showToast('❌ Не удалось отправить сообщение', 'error');
 input.value = text;
 }
@@ -795,12 +875,20 @@ await kickTeamMember(senderId);
 // === ПОСТРАНИЧНАЯ ЗАГРУЗКА ИСТОРИИ ===
 function handleChatScroll(el) {
 if (el.scrollTop < 40) loadMoreChatMessages(currentChatTeamId);
+// Запоминаем «увиденное» время, когда пользователь у самого низа (для бейджа кнопки «вниз»)
+if (el.scrollHeight - el.scrollTop - el.clientHeight < 60) {
+const msgs = chatMessagesCache[currentChatTeamId] || [];
+for (let i = msgs.length - 1; i >= 0; i--) {
+if (!msgs[i].__pending && !msgs[i].__failed) { window.__chatSeenTs = Math.max(window.__chatSeenTs || 0, msgTs(msgs[i])); break; }
+}
+}
+updateChatScrollDownBtn();
 }
 async function loadMoreChatMessages(teamId) {
 if (!teamId || !db || chatOldestLoaded[teamId] === 'end') return;
 const msgs = chatMessagesCache[teamId] || [];
 if (msgs.length === 0) return;
-const oldestTs = msgs[0].createdAt;
+const oldestTs = msgTs(msgs[0]);
 try {
 const snap = await db.collection('teamRegistry').doc(teamId).collection('chat')
 .orderBy('createdAt', 'desc').startAfter(oldestTs).limit(30).get();

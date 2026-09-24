@@ -634,8 +634,43 @@ padding-top: calc(10px + env(safe-area-inset-top));
 background: #121212; border-bottom:1px solid rgba(255,255,255,0.08);
 }
 body.light .chat-page-header { background: #F5F5DC; }
-#chat-input-bar { flex-shrink: 0; background: #121212; }
+#chat-input-bar { flex-shrink: 0; background: #121212; padding-bottom: env(safe-area-inset-bottom); }
 body.light #chat-input-bar { background: #F5F5DC; }
+/* Кнопка «вниз» в чате */
+#chat-scroll-down {
+position: absolute;
+right: 14px;
+bottom: 120px;
+z-index: 5;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+width: 42px;
+padding: 8px 0 6px;
+border: none;
+border-radius: 50%;
+background: rgba(30,30,30,0.85);
+color: #90caf9;
+box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+cursor: pointer;
+}
+body.light #chat-scroll-down { background: rgba(255,255,255,0.9); color: #0d47a1; box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
+#chat-scroll-down-badge {
+position: absolute;
+top: -4px;
+right: -2px;
+min-width: 18px;
+height: 18px;
+padding: 0 4px;
+border-radius: 9px;
+background: #ef5350;
+color: #fff;
+font-size: 11px;
+font-weight: bold;
+align-items: center;
+justify-content: center;
+box-sizing: border-box;
+}
 #chat-messages-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
 .chat-page-header h2 { margin:0; font-size:16px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #modal-section-edit .btn-main { background: rgba(129, 212, 250, 0.5) !important; color: #fff !important; }
