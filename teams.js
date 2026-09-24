@@ -401,8 +401,16 @@ return msgs.filter(m => !m.deleted && !m.__pending && !m.__failed && m.senderId 
 }
 function markChatRead(teamId) {
 if (!db || !currentUser) return;
+// Отметка «прочитано» = время самого свежего чужого сообщения, а не текущие часы:
+// иначе при спешащих часах отправителя его сообщения вечно считаются непрочитанными
+const msgs = chatMessagesCache[teamId] || [];
+let newestOther = 0;
+for (const m of msgs) {
+if (!m.__pending && !m.__failed && m.senderId !== currentUser.uid) newestOther = Math.max(newestOther, msgTs(m));
+}
+const val = newestOther > 0 ? newestOther : firebase.firestore.FieldValue.serverTimestamp();
 db.collection('teamRegistry').doc(teamId).collection('chatReads').doc(currentUser.uid)
-.set({ lastReadAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(err => console.error('mark chat read failed:', err));
+.set({ lastReadAt: val }, { merge: true }).catch(err => console.error('mark chat read failed:', err));
 }
 
 // === РЕНДЕР СООБЩЕНИЙ ===
